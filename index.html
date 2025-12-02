@@ -45,6 +45,33 @@
       height: 100%;
     }
 
+    #infoBar {
+      position: absolute;
+      top: 0.4rem;
+      left: 0.4rem;
+      right: 0.4rem;
+      background: rgba(255, 255, 255, 0.95);
+      padding: 0.4rem 0.6rem;
+      border-radius: 0.3rem;
+      font-size: 0.8rem;
+      border: 1px solid #c8c2b5;
+      pointer-events: none;
+    }
+
+    #infoTitle {
+      font-weight: 600;
+      margin-bottom: 0.15rem;
+    }
+
+    #hudStats {
+      font-weight: 600;
+      margin-bottom: 0.15rem;
+    }
+
+    #infoHelp {
+      font-size: 0.75rem;
+    }
+
     #touchControlsBar {
       flex: 0 0 auto;
       display: flex;
@@ -107,6 +134,13 @@
   <div id="gameContainer">
     <div id="gameArea">
       <canvas id="gameCanvas"></canvas>
+      <div id="infoBar">
+        <div id="infoTitle">Kindle Tetris</div>
+        <div id="hudStats">Score: 0 · Lines: 0 · Level: 1 · Time: 00:00</div>
+        <div id="infoHelp">
+          ◀ / ▶ move • ▲ rotate • ▼ down • Space drop • N / NEW = new game
+        </div>
+      </div>
     </div>
 
     <div id="touchControlsBar">
@@ -129,6 +163,7 @@
     // ===== Basic setup =====
     var canvas = document.getElementById("gameCanvas");
     var ctx = canvas.getContext("2d");
+    var hudStats = document.getElementById("hudStats");
 
     var COLS = 10;
     var ROWS = 20;
@@ -139,7 +174,7 @@
     var currentX = 0;
     var currentY = 0;
 
-    var dropInterval = 800;    // ms between automatic drops (decreases with level)
+    var dropInterval = 800;    // ms between automatic drops (will decrease with level)
     var dropTimer = 0;
 
     var lastTime = 0;
@@ -148,9 +183,9 @@
     var score = 0;
     var linesCleared = 0;
     var level = 1;
-    var elapsedMs = 0;         // timer
+    var elapsedMs = 0;         // total elapsed time
 
-    // Tetrominoes
+    // Tetrominoes (shapes as matrices of 0/1)
     var SHAPES = [
       [[1,1,1,1]],                  // I
       [[1,0,0],[1,1,1]],            // J
@@ -252,7 +287,7 @@
     bindButton("btnDrop", hardDrop);
     bindButton("btnNew", newGame);
 
-    // ===== Core logic =====
+    // ===== Core Tetris logic =====
     function rotateMatrix(matrix) {
       var rows = matrix.length;
       var cols = matrix[0].length;
@@ -317,15 +352,16 @@
         }
       }
       if (lines > 0) {
-        // 1/2/3/4 lines -> 100/300/500/800 base points
+        // Basic scoring similar to classic Tetris: 1/2/3/4 lines -> 100/300/500/800 base
         var lineScore = [0,100,300,500,800];
         score += lineScore[Math.min(lines,4)] * level;
 
         linesCleared += lines;
+        // level up every 10 lines
         var newLevel = 1 + Math.floor(linesCleared / 10);
         if (newLevel !== level) {
           level = newLevel;
-          // bigger step per level so you really feel it
+          // make speed increase more noticeable: bigger step per level
           dropInterval = Math.max(150, 900 - (level - 1) * 120);
         }
       }
@@ -420,43 +456,30 @@
       }
     }
 
-    function drawHUD() {
-      ctx.fillStyle = "#111";
-      ctx.font = "14px system-ui, sans-serif";
-      ctx.textBaseline = "top";
-
+    function updateHUD() {
+      if (!hudStats) return;
       var seconds = Math.floor(elapsedMs / 1000);
       var mm = String(Math.floor(seconds / 60)).padStart(2,"0");
       var ss = String(seconds % 60).padStart(2,"0");
       var timeStr = mm + ":" + ss;
-
-      var text = "Score: " + score +
-                 "  Lines: " + linesCleared +
-                 "  Level: " + level +
-                 "  Time: " + timeStr;
-      ctx.fillText(text, 10, 8);
-
-      if (gameOver) {
-        var msg = "Game over – N / NEW to restart";
-        ctx.font = "16px system-ui, sans-serif";
-        var w = ctx.measureText(msg).width;
-        ctx.fillText(msg, (canvas.width - w) / 2, 30);
-      }
+      hudStats.textContent =
+        "Score: " + score +
+        " · Lines: " + linesCleared +
+        " · Level: " + level +
+        " · Time: " + timeStr;
     }
 
     function render() {
       clearCanvas();
-
       var boardWidth = COLS * cellSize;
       var boardHeight = ROWS * cellSize;
-      // leave a bit more space at the top for HUD
       var offsetX = Math.floor((canvas.width - boardWidth) / 2);
-      var offsetY = Math.floor((canvas.height - boardHeight) / 2) + 15;
+      var offsetY = Math.floor((canvas.height - boardHeight) / 2);
 
       drawGrid(offsetX, offsetY);
       drawBoard(offsetX, offsetY);
       drawCurrent(offsetX, offsetY);
-      drawHUD();
+      updateHUD();
     }
 
     // ===== Game loop =====
