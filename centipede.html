@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Kindle Centipede</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <style>
+    * {
+      box-sizing: border-box;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #e9e5d8;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #111;
+    }
+
+    #gameContainer {
+      display: flex;
+      flex-direction: column;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    #gameArea {
+      position: relative;
+      flex: 1 1 auto;
+      width: 100%;
+      overflow: hidden;
+      background: #f4f2ea;
+      border-bottom: 1px solid #c0b9aa;
+    }
+
+    #gameCanvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    #touchControlsBar {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.7rem 0.5rem;
+    }
+
+    #touchControls {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.6rem;
+      width: 100%;
+      max-width: 500px;
+      margin: 0 auto;
+    }
+
+    .ctrl-row {
+      display: flex;
+      justify-content: center;
+      gap: 0.8rem;
+      width: 100%;
+    }
+
+    .ctrl-btn {
+      flex: 1 1 auto;
+      min-width: 4.3rem;
+      min-height: 4.3rem;
+      border-radius: 1.2rem;
+      border: 1px solid #857d6a;
+      background: #fdfbf6;
+      color: #111;
+      font-size: 1.3rem;
+      font-weight: 600;
+      padding: 0.4rem 0.6rem;
+      cursor: pointer;
+      touch-action: none;
+    }
+
+    .ctrl-btn.wide {
+      min-width: 6rem;
+      font-size: 1.1rem;
+    }
+
+    .ctrl-btn:active {
+      background: #e4decf;
+    }
+
+    @media (min-width: 900px) {
+      .ctrl-btn {
+        min-width: 4rem;
+        min-height: 4rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="gameContainer">
+    <div id="gameArea">
+      <canvas id="gameCanvas"></canvas>
+    </div>
+
+    <div id="touchControlsBar">
+      <div id="touchControls">
+        <div class="ctrl-row">
+          <button id="btnLeft" class="ctrl-btn">◀</button>
+          <button id="btnRight" class="ctrl-btn">▶</button>
+          <button id="btnFire" class="ctrl-btn wide">FIRE</button>
+        </div>
+        <div class="ctrl-row">
+          <button id="btnNew" class="ctrl-btn wide">NEW</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ===== Canvas & grid setup =====
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+    const GRID_COLS = 15;
+    const GRID_ROWS = 22;
+    let cellSize = 20;
+    let gridOffsetX = 0;
+    let gridOffsetY = 0;
+
+    function resizeCanvas() {
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+
+      const cw = canvas.width / GRID_COLS;
+      const ch = canvas.height / GRID_ROWS;
+      cellSize = Math.floor(Math.min(cw, ch));
+
+      const boardWidth = cellSize * GRID_COLS;
+      const boardHeight = cellSize * GRID_ROWS;
+      gridOffsetX = Math.floor((canvas.width - boardWidth) / 2);
+      gridOffsetY = Math.floor((canvas.height - boardHeight) / 2);
+    }
+
+    window.addEventListener("resize", resizeCanvas);
+
+    function gridToCenter(col, row) {
+      return {
+        x: gridOffsetX + col * cellSize + cellSize / 2,
+        y: gridOffsetY + row * cellSize + cellSize / 2
+      };
+    }
+
+    // ===== Game state =====
+    const keys = { left: false, right: false, fire: false };
+
+    const player = {
+      col: Math.floor(GRID_COLS / 2),
+      row: GRID_ROWS - 2,
+      lives: 3,
+      alive: true
+    };
+
+    let bullets = [];
+    let mushrooms = [];
+    let centipedes = [];  // multiple centipedes
+    let explosions = [];
+
+    let score = 0;
+    let level = 1;
+    let gameOver = false;
+
+    let centipedeStepTimer = 0;
+    let centipedeStepInterval = 0.5; // seconds between moves
+
+    let fireCooldown = 0;
+
+    // ===== Input handling =====
+    document.addEventListener("keydown", (e) => {
+      let handled = false;
+      if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") {
+        keys.left = true; handled = true;
+      } else if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") {
+        keys.right = true; handled = true;
+      } else if (e.key === " " || e.key === "ArrowUp" || e.key === "w" || e.key === "W") {
+        keys.fire = true; handled = true;
+      } else if (e.key === "n" || e.key === "N") {
+        resetGame(); handled = true;
+      }
+      if (handled) e.preventDefault();
+    });
+
+    document.addEventListener("keyup", (e) => {
+      let handled = false;
+      if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") {
+        keys.left = false; handled = true;
+      } else if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") {
+        keys.right = false; handled = true;
+      } else if (e.key === " " || e.key === "ArrowUp" || e.key === "w" || e.key === "W") {
+        keys.fire = false; handled = true;
+      }
+      if (handled) e.preventDefault();
+    });
+
+    function bindButton(btnId, keyName, momentary = true) {
+      const btn = document.getElementById(btnId);
+      if (!btn) return;
+
+      const down = (ev) => {
+        ev.preventDefault();
+        keys[keyName] = true;
+      };
+      const up = (ev) => {
+        ev.preventDefault();
+        if (momentary) keys[keyName] = false;
+      };
+
+      btn.addEventListener("touchstart", down, { passive: false });
+      btn.addEventListener("touchend", up, { passive: false });
+      btn.addEventListener("touchcancel", up, { passive: false });
+      btn.addEventListener("mousedown", down);
+      document.addEventListener("mouseup", () => { if (momentary) keys[keyName] = false; });
+    }
+
+    bindButton("btnLeft", "left");
+    bindButton("btnRight", "right");
+    bindButton("btnFire", "fire");
+    document.getElementById("btnNew").addEventListener("click", (e) => {
+      e.preventDefault();
+      resetGame();
+    });
+
+    // ===== Helper functions =====
+    function clamp(v, min, max) {
+      if (v < min) return min;
+      if (v > max) return max;
+      return v;
+    }
+
+    function randomInt(min, max) {
+      return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+
+    function mushroomAt(col, row) {
+      for (let i = 0; i < mushrooms.length; i++) {
+        if (mushrooms[i].col === col && mushrooms[i].row === row) return mushrooms[i];
+      }
+      return null;
+    }
+
+    function removeMushroom(m) {
+      const idx = mushrooms.indexOf(m);
+      if (idx >= 0) mushrooms.splice(idx, 1);
+    }
+
+    function segmentAt(col, row) {
+      for (let ci = 0; ci < centipedes.length; ci++) {
+        const segs = centipedes[ci].segments;
+        for (let si = 0; si < segs.length; si++) {
+          if (segs[si].col === col && segs[si].row === row) {
+            return { centIndex: ci, segIndex: si };
+          }
+        }
+      }
+      return null;
+    }
+
+    // ===== Game setup =====
+    function createMushrooms() {
+      mushrooms = [];
+      const count = 25;
+      for (let i = 0; i < count; i++) {
+        const col = randomInt(0, GRID_COLS - 1);
+        const row = randomInt(2, GRID_ROWS - 6); // mid field
+        if (col === player.col && row === player.row) continue;
+        if (mushroomAt(col, row)) continue;
+        mushrooms.push({ col, row, hp: 3 });
+      }
+    }
+
+    function createCentipede(length, startRow) {
+      const segments = [];
+      let col = 0;
+      for (let i = 0; i < length; i++) {
+        segments.push({ col: col, row: startRow });
+        col = (col + 1) % GRID_COLS;
+      }
+      return {
+        segments,
+        dir: 1 // 1 = right, -1 = left
+      };
+    }
+
+    function resetGame() {
+      player.col = Math.floor(GRID_COLS / 2);
+      player.row = GRID_ROWS - 2;
+      player.lives = 3;
+      player.alive = true;
+
+      score = 0;
+      level = 1;
+      gameOver = false;
+
+      bullets = [];
+      explosions = [];
+      createMushrooms();
+      centipedes = [ createCentipede(10, 0) ];
+      centipedeStepInterval = 0.5;
+      centipedeStepTimer = 0;
+      fireCooldown = 0;
+    }
+
+    function nextLevel() {
+      level++;
+      // Keep mushrooms to make later levels harder
+      const length = Math.min(20, 8 + level * 2);
+      centipedes = [ createCentipede(length, 0) ];
+      centipedeStepInterval = Math.max(0.15, 0.5 - (level - 1) * 0.03);
+    }
+
+    // ===== Updates =====
+    function update(dt) {
+      if (gameOver) return;
+
+      if (!player.alive) {
+        // out of lives; wait for NEW / N
+        return;
+      }
+
+      // Player movement (step-based to avoid e-ink smearing)
+      if (keys.left) {
+        player.col = clamp(player.col - 1, 0, GRID_COLS - 1);
+        keys.left = false;
+      } else if (keys.right) {
+        player.col = clamp(player.col + 1, 0, GRID_COLS - 1);
+        keys.right = false;
+      }
+
+      // Firing
+      fireCooldown -= dt;
+      if (fireCooldown < 0) fireCooldown = 0;
+      if (keys.fire && fireCooldown === 0) {
+        spawnBullet();
+        fireCooldown = 0.25;
+      }
+
+      // Bullets
+      updateBullets(dt);
+
+      // Centipedes
+      centipedeStepTimer += dt;
+      if (centipedeStepTimer >= centipedeStepInterval) {
+        centipedeStepTimer -= centipedeStepInterval;
+        stepCentipedes();
+      }
+
+      // Explosions
+      updateExplosions(dt);
+    }
+
+    function spawnBullet() {
+      if (!player.alive) return;
+      const p = gridToCenter(player.col, player.row);
+      bullets.push({
+        x: p.x,
+        y: p.y - cellSize * 0.5,
+        vy: -300
+      });
+    }
+
+    function updateBullets(dt) {
+      for (let i = bullets.length - 1; i >= 0; i--) {
+        const b = bullets[i];
+        b.y += b.vy * dt;
+
+        if (b.y < gridOffsetY - 10) {
+          bullets.splice(i, 1);
+          continue;
+        }
+
+        const col = Math.floor((b.x - gridOffsetX) / cellSize);
+        const row = Math.floor((b.y - gridOffsetY) / cellSize);
+        if (col < 0 || col >= GRID_COLS || row < 0 || row >= GRID_ROWS) continue;
+
+        // Hit mushroom?
+        const mush = mushroomAt(col, row);
+        if (mush) {
+          bullets.splice(i, 1);
+          mush.hp--;
+          if (mush.hp <= 0) {
+            removeMushroom(mush);
+            score += 2;
+            spawnExplosionAtGrid(col, row);
+          }
+          continue;
+        }
+
+        // Hit centipede segment?
+        const hit = segmentAt(col, row);
+        if (hit) {
+          bullets.splice(i, 1);
+          handleCentipedeHit(hit.centIndex, hit.segIndex);
+          continue;
+        }
+      }
+    }
+
+    function handleCentipedeHit(centIndex, segIndex) {
+      const cent = centipedes[centIndex];
+      const hitSeg = cent.segments[segIndex];
+
+      spawnExplosionAtGrid(hitSeg.col, hitSeg.row);
+      score += 5;
+
+      const leftPart  = cent.segments.slice(0, segIndex);
+      const rightPart = cent.segments.slice(segIndex + 1);
+
+      // Remove old centipede
+      centipedes.splice(centIndex, 1);
+
+      // Create new centipedes from remaining parts
+      if (leftPart.length > 0) {
+        centipedes.push({
+          segments: leftPart,
+          dir: cent.dir
+        });
+      }
+      if (rightPart.length > 0) {
+        centipedes.push({
+          segments: rightPart,
+          dir: cent.dir
+        });
+      }
+
+      // If all are gone, next level
+      if (centipedes.length === 0) nextLevel();
+    }
+
+    function stepCentipedes() {
+      for (let ci = 0; ci < centipedes.length; ci++) {
+        const cent = centipedes[ci];
+        if (cent.segments.length === 0) continue;
+
+        const head = cent.segments[0];
+        let nextCol = head.col + cent.dir;
+        let nextRow = head.row;
+
+        // Check edge or mushroom ahead
+        let needDrop = false;
+        if (nextCol < 0 || nextCol >= GRID_COLS) {
+          needDrop = true;
+        } else {
+          const mush = mushroomAt(nextCol, nextRow);
+          if (mush) needDrop = true;
+        }
+
+        if (needDrop) {
+          nextRow = head.row + 1;
+          cent.dir *= -1;
+          nextCol = clamp(head.col + cent.dir, 0, GRID_COLS - 1);
+        }
+
+        // Move body: new head + shift segments
+        const newSegments = cent.segments.slice();
+        newSegments.pop();
+        newSegments.unshift({ col: nextCol, row: nextRow });
+        cent.segments = newSegments;
+
+        // Check collision with player
+        for (let i = 0; i < cent.segments.length; i++) {
+          const s = cent.segments[i];
+          if (s.row >= player.row && s.col === player.col) {
+            playerHit();
+            break;
+          }
+        }
+
+        // If any segment reaches bottom, treat as hit
+        for (let i = 0; i < cent.segments.length; i++) {
+          const s = cent.segments[i];
+          if (s.row >= GRID_ROWS - 1) {
+            playerHit();
+            break;
+          }
+        }
+      }
+    }
+
+    function playerHit() {
+      if (!player.alive) return;
+      player.lives--;
+      if (player.lives <= 0) {
+        player.alive = false;
+        gameOver = true;
+      } else {
+        // reset player position only
+        player.col = Math.floor(GRID_COLS / 2);
+        player.row = GRID_ROWS - 2;
+      }
+    }
+
+    function spawnExplosionAtGrid(col, row) {
+      const p = gridToCenter(col, row);
+      explosions.push({
+        x: p.x,
+        y: p.y,
+        age: 0,
+        duration: 0.35
+      });
+    }
+
+    function updateExplosions(dt) {
+      for (let i = explosions.length - 1; i >= 0; i--) {
+        const ex = explosions[i];
+        ex.age += dt;
+        if (ex.age > ex.duration) {
+          explosions.splice(i, 1);
+        }
+      }
+    }
+
+    // ===== Rendering =====
+    function drawGrid() {
+      ctx.strokeStyle = "#d5cfbf";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let c = 0; c <= GRID_COLS; c++) {
+        const x = gridOffsetX + c * cellSize + 0.5;
+        ctx.moveTo(x, gridOffsetY);
+        ctx.lineTo(x, gridOffsetY + GRID_ROWS * cellSize);
+      }
+      for (let r = 0; r <= GRID_ROWS; r++) {
+        const y = gridOffsetY + r * cellSize + 0.5;
+        ctx.moveTo(gridOffsetX, y);
+        ctx.lineTo(gridOffsetX + GRID_COLS * cellSize, y);
+      }
+      ctx.stroke();
+    }
+
+    function drawHUD() {
+      ctx.fillStyle = "#111";
+      ctx.font = "14px system-ui, sans-serif";
+      ctx.textBaseline = "top";
+      const text = "Score: " + score +
+                   "   Level: " + level +
+                   "   Lives: " + player.lives;
+      ctx.fillText(text, 10, 8);
+
+      if (gameOver) {
+        const msg = "Game over – NEW or N to restart";
+        ctx.font = "16px system-ui, sans-serif";
+        const w = ctx.measureText(msg).width;
+        ctx.fillText(msg, (canvas.width - w) / 2, 28);
+      }
+    }
+
+    function drawMushrooms() {
+      ctx.lineWidth = 1.5;
+      for (let i = 0; i < mushrooms.length; i++) {
+        const m = mushrooms[i];
+        const p = gridToCenter(m.col, m.row);
+        const r = cellSize * 0.35;
+        ctx.beginPath();
+        ctx.fillStyle = m.hp === 3 ? "#a38b6a" : m.hp === 2 ? "#b6a184" : "#ccc0a5";
+        ctx.strokeStyle = "#6e5b46";
+        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
+    function drawCentipedes() {
+      for (let ci = 0; ci < centipedes.length; ci++) {
+        const cent = centipedes[ci];
+        for (let i = 0; i < cent.segments.length; i++) {
+          const s = cent.segments[i];
+          const p = gridToCenter(s.col, s.row);
+          const r = cellSize * 0.35;
+          ctx.beginPath();
+          ctx.fillStyle = i === 0 ? "#333" : "#555";
+          ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+          ctx.fill();
+
+          // "eyes" on head
+          if (i === 0) {
+            const eyeR = r * 0.25;
+            ctx.beginPath();
+            ctx.fillStyle = "#eee";
+            ctx.arc(p.x - eyeR * 0.7, p.y - eyeR * 0.5, eyeR, 0, Math.PI * 2);
+            ctx.arc(p.x + eyeR * 0.7, p.y - eyeR * 0.5, eyeR, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      }
+    }
+
+    function drawPlayer() {
+      if (!player.alive) return;
+      const p = gridToCenter(player.col, player.row);
+      const w = cellSize * 0.7;
+      const h = cellSize * 0.35;
+      ctx.fillStyle = "#264653";
+      ctx.strokeStyle = "#11202a";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.rect(p.x - w / 2, p.y - h / 2, w, h);
+      ctx.fill();
+      ctx.stroke();
+
+      // turret
+      ctx.beginPath();
+      ctx.rect(p.x - cellSize * 0.05, p.y - h / 2 - cellSize * 0.25, cellSize * 0.1, cellSize * 0.25);
+      ctx.fill();
+    }
+
+    function drawBullets() {
+      ctx.fillStyle = "#111";
+      for (let i = 0; i < bullets.length; i++) {
+        const b = bullets[i];
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    function drawExplosions() {
+      for (let i = 0; i < explosions.length; i++) {
+        const ex = explosions[i];
+        const t = ex.age / ex.duration;
+        const radius = cellSize * (0.8 + t * 1.1);
+        ctx.save();
+        ctx.globalAlpha = 0.3 * (1 - t);
+        ctx.fillStyle = "#444";
+        ctx.beginPath();
+        ctx.arc(ex.x, ex.y, radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    function render() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawGrid();
+      drawMushrooms();
+      drawCentipedes();
+      drawPlayer();
+      drawBullets();
+      drawExplosions();
+      drawHUD();
+    }
+
+    // ===== Game loop =====
+    let lastTime = 0;
+    function gameLoop(timestamp) {
+      if (!lastTime) lastTime = timestamp;
+      let dt = (timestamp - lastTime) / 1000;
+      if (dt > 0.25) dt = 0.25; // clamp big jumps
+      lastTime = timestamp;
+
+      update(dt);
+      render();
+      requestAnimationFrame(gameLoop);
+    }
+
+    // ===== Init =====
+    resizeCanvas();
+    resetGame();
+    requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>
