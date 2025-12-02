@@ -23,19 +23,28 @@
       color: #111;
     }
 
+    /* Whole screen: canvas on top, controls below */
     #gameContainer {
-      position: relative;
+      display: flex;
+      flex-direction: column;
       width: 100vw;
       height: 100vh;
+    }
+
+    /* Area that holds the canvas and overlay */
+    #gameArea {
+      position: relative;
+      flex: 1 1 auto;
+      width: 100%;
       overflow: hidden;
+      background: #f4f2ea;
+      border-bottom: 1px solid #c0b9aa;
     }
 
     #gameCanvas {
       display: block;
       width: 100%;
-      height: calc(100% - 7rem); /* room for controls */
-      background: #f4f2ea;
-      border-bottom: 1px solid #c0b9aa;
+      height: 100%;
     }
 
     #uiOverlay {
@@ -57,16 +66,13 @@
       border: 1px solid #c8c2b5;
     }
 
-    #touchControlsWrapper {
-      position: absolute;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      height: 7rem;
+    /* Controls live in normal flow, always centered */
+    #touchControlsBar {
+      flex: 0 0 auto;
       display: flex;
       align-items: center;
       justify-content: center;
-      pointer-events: auto;
+      padding: 0.7rem 0.5rem;
     }
 
     #touchControls {
@@ -76,7 +82,7 @@
       justify-content: center;
       gap: 0.6rem;
       width: 100%;
-      max-width: 420px;      /* <<< keeps controls in a centered column */
+      max-width: 420px; /* keeps them in a centered block */
       margin: 0 auto;
     }
 
@@ -113,12 +119,6 @@
     }
 
     @media (min-width: 900px) {
-      #gameCanvas {
-        height: calc(100% - 6rem);
-      }
-      #touchControlsWrapper {
-        height: 6rem;
-      }
       .ctrl-btn {
         min-width: 4rem;
         min-height: 4rem;
@@ -128,41 +128,40 @@
 </head>
 <body>
   <div id="gameContainer">
-    <canvas id="gameCanvas"></canvas>
-    <div id="uiOverlay">
-      <div id="infoBar">
-        <div><strong>Kindle Tank Game</strong></div>
-        <div id="infoText">
-          Arrows/WASD to turn &amp; move, Space to shoot, R or FIRE to restart.
+    <div id="gameArea">
+      <canvas id="gameCanvas"></canvas>
+      <div id="uiOverlay">
+        <div id="infoBar">
+          <div><strong>Kindle Tank Game</strong></div>
+          <div>Arrows/WASD to turn &amp; move, Space to shoot, R or FIRE to restart.</div>
         </div>
       </div>
+    </div>
 
-      <!-- Big centered touch controls (bottom) -->
-      <div id="touchControlsWrapper">
-        <div id="touchControls">
-          <div class="ctrl-row">
-            <button id="btnLeft" class="ctrl-btn">⟲</button>
-            <button id="btnForward" class="ctrl-btn">▲</button>
-            <button id="btnRight" class="ctrl-btn">⟳</button>
-          </div>
-          <div class="ctrl-row">
-            <button id="btnShoot" class="ctrl-btn wide">FIRE</button>
-          </div>
+    <!-- BIG centered touch controls at bottom -->
+    <div id="touchControlsBar">
+      <div id="touchControls">
+        <div class="ctrl-row">
+          <button id="btnLeft" class="ctrl-btn">⟲</button>
+          <button id="btnForward" class="ctrl-btn">▲</button>
+          <button id="btnRight" class="ctrl-btn">⟳</button>
+        </div>
+        <div class="ctrl-row">
+          <button id="btnShoot" class="ctrl-btn wide">FIRE</button>
         </div>
       </div>
     </div>
   </div>
 
   <script>
-    // ======== Canvas setup ========
+    // ======== Canvas & layout ========
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
 
     function resizeCanvas() {
-      const rect = document.getElementById("gameContainer").getBoundingClientRect();
-      const controlsHeight = document.getElementById("touchControlsWrapper").offsetHeight || 112;
+      const rect = canvas.getBoundingClientRect();
       canvas.width = rect.width;
-      canvas.height = rect.height - controlsHeight;
+      canvas.height = rect.height;
     }
     window.addEventListener("resize", resizeCanvas);
     resizeCanvas();
@@ -170,7 +169,7 @@
     // ======== Input state ========
     const keys = { left: false, right: false, forward: false, shoot: false };
 
-    // Directions (90° steps): 0 right, 1 down, 2 left, 3 up
+    // 90° directions
     const DIRS = [
       { angle: 0, vx: 1, vy: 0 },
       { angle: Math.PI / 2, vx: 0, vy: 1 },
@@ -188,7 +187,7 @@
       alive: true
     };
 
-    const bullets = []; // player & enemies
+    const bullets = [];
     const targets = [];
     const enemies = [];
 
@@ -223,15 +222,11 @@
       const margin = 20;
       const side = Math.floor(Math.random() * 4);
       let x, y;
-      if (side === 0) {
-        x = randRange(margin, canvas.width - margin); y = margin;
-      } else if (side === 1) {
-        x = canvas.width - margin; y = randRange(margin, canvas.height - margin);
-      } else if (side === 2) {
-        x = randRange(margin, canvas.width - margin); y = canvas.height - margin;
-      } else {
-        x = margin; y = randRange(margin, canvas.height - margin);
-      }
+      if (side === 0) { x = randRange(margin, canvas.width - margin); y = margin; }
+      else if (side === 1) { x = canvas.width - margin; y = randRange(margin, canvas.height - margin); }
+      else if (side === 2) { x = randRange(margin, canvas.width - margin); y = canvas.height - margin; }
+      else { x = margin; y = randRange(margin, canvas.height - margin); }
+
       enemies.push({
         x, y,
         dirIndex: 1,
@@ -307,6 +302,12 @@
       });
     }
 
+    function hitPlayer() {
+      if (!player.alive) return;
+      player.lives--;
+      if (player.lives <= 0) player.alive = false;
+    }
+
     // ======== Reset ========
     function resetGame() {
       player.x = canvas.width / 2;
@@ -324,49 +325,36 @@
       ensureEnemies(2);
     }
 
-    function hitPlayer() {
-      if (!player.alive) return;
-      player.lives--;
-      if (player.lives <= 0) player.alive = false;
-    }
-
-    // ======== Update logic (discrete steps for e-ink) ========
+    // ======== Update logic (6 fps-ish) ========
     function update(dt) {
-      // if dead, allow FIRE to restart
       if (!player.alive) {
         if (keys.shoot) { keys.shoot = false; resetGame(); }
         updateBullets(dt);
         return;
       }
 
-      const moveSpeed = 90;  // px/s, slower for Scribe
-      const rotStep = 1;
-
-      // 90° step rotation
+      const moveSpeed = 90;
       if (keys.left) {
         keys.left = false;
-        player.dirIndex = (player.dirIndex - rotStep + 4) % 4;
+        player.dirIndex = (player.dirIndex + 3) % 4;
       }
       if (keys.right) {
         keys.right = false;
-        player.dirIndex = (player.dirIndex + rotStep) % 4;
+        player.dirIndex = (player.dirIndex + 1) % 4;
       }
 
-      // move forward
       if (keys.forward) {
         const dir = DIRS[player.dirIndex];
         player.x += dir.vx * moveSpeed * dt;
         player.y += dir.vy * moveSpeed * dt;
       }
 
-      // keep inside bounds
       const margin = player.radius + 2;
       if (player.x < margin) player.x = margin;
       if (player.x > canvas.width - margin) player.x = canvas.width - margin;
       if (player.y < margin) player.y = margin;
       if (player.y > canvas.height - margin) player.y = canvas.height - margin;
 
-      // shooting
       shootCooldown -= dt; if (shootCooldown < 0) shootCooldown = 0;
       if (keys.shoot && shootCooldown === 0) {
         fireBullet(player, 200, false);
@@ -407,38 +395,35 @@
             continue;
           }
         } else if (!b.fromEnemy) {
-          // player bullet hits target
-          let hitSomething = false;
+          let hit = false;
           for (let j = targets.length - 1; j >= 0; j--) {
             const t = targets[j];
             if (distance(b.x, b.y, t.x, t.y) < t.radius) {
               targets.splice(j, 1);
               score += 1;
-              hitSomething = true;
+              hit = true;
               break;
             }
           }
-          if (hitSomething) { bullets.splice(i, 1); continue; }
+          if (hit) { bullets.splice(i, 1); continue; }
 
-          // player bullet hits enemy
           for (let k = enemies.length - 1; k >= 0; k--) {
             const e = enemies[k];
             if (distance(b.x, b.y, e.x, e.y) < e.radius) {
               enemies.splice(k, 1);
               score += 2;
-              hitSomething = true;
+              hit = true;
               break;
             }
           }
-          if (hitSomething) { bullets.splice(i, 1); continue; }
+          if (hit) { bullets.splice(i, 1); continue; }
         }
       }
     }
 
     function updateEnemies(dt) {
-      const speed = 25; // even slower for Scribe
+      const speed = 25;
       for (const e of enemies) {
-        // change facing toward player only every 0.3s
         e.moveTimer += dt;
         if (e.moveTimer > 0.3) {
           e.moveTimer = 0;
@@ -455,19 +440,16 @@
         e.x += dir.vx * speed * dt;
         e.y += dir.vy * speed * dt;
 
-        // bounds
         const margin = e.radius + 2;
         if (e.x < margin) { e.x = margin; e.dirIndex = 0; }
         if (e.x > canvas.width - margin) { e.x = canvas.width - margin; e.dirIndex = 2; }
         if (e.y < margin) { e.y = margin; e.dirIndex = 1; }
         if (e.y > canvas.height - margin) { e.y = canvas.height - margin; e.dirIndex = 3; }
 
-        // collision with player body
         if (player.alive && distance(e.x, e.y, player.x, player.y) < e.radius + player.radius - 3) {
           hitPlayer();
         }
 
-        // shooting when roughly aligned
         e.shootCooldown -= dt; if (e.shootCooldown < 0) e.shootCooldown = 0;
         if (e.shootCooldown === 0 && player.alive) {
           const dx = player.x - e.x;
@@ -580,15 +562,15 @@
       drawHUD();
     }
 
-    // ======== Game loop (6 fps-ish) ========
+    // ======== Game loop (6fps-ish) ========
     let lastTime = 0;
     let accumulator = 0;
-    const STEP = 1 / 6; // ~6 updates per second
+    const STEP = 1 / 6;
 
     function gameLoop(timestamp) {
       if (!lastTime) lastTime = timestamp;
       let dt = (timestamp - lastTime) / 1000;
-      if (dt > 0.25) dt = 0.25;   // clamp huge pauses
+      if (dt > 0.25) dt = 0.25;
       lastTime = timestamp;
       accumulator += dt;
 
@@ -598,12 +580,11 @@
       }
 
       render();
-      window.requestAnimationFrame(gameLoop);
+      requestAnimationFrame(gameLoop);
     }
 
-    // Start
     resetGame();
-    window.requestAnimationFrame(gameLoop);
+    requestAnimationFrame(gameLoop);
   </script>
 </body>
 </html>
