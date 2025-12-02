@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Kindle Tank Game – Grid Forward Snap</title>
+  <title>Kindle Tetris</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <style>
     * {
@@ -45,23 +45,17 @@
       height: 100%;
     }
 
-    #uiOverlay {
-      position: absolute;
-      inset: 0;
-      pointer-events: none;
-    }
-
     #infoBar {
       position: absolute;
       top: 0.4rem;
       left: 0.4rem;
+      right: 0.4rem;
       background: rgba(255, 255, 255, 0.9);
       padding: 0.3rem 0.5rem;
       border-radius: 0.3rem;
-      font-size: 0.75rem;
-      pointer-events: none;
-      max-width: 95%;
+      font-size: 0.8rem;
       border: 1px solid #c8c2b5;
+      pointer-events: none;
     }
 
     #touchControlsBar {
@@ -79,7 +73,7 @@
       justify-content: center;
       gap: 0.6rem;
       width: 100%;
-      max-width: 420px;
+      max-width: 500px;
       margin: 0 auto;
     }
 
@@ -98,7 +92,7 @@
       border: 1px solid #857d6a;
       background: #fdfbf6;
       color: #111;
-      font-size: 1.5rem;
+      font-size: 1.3rem;
       font-weight: 600;
       padding: 0.4rem 0.6rem;
       cursor: pointer;
@@ -106,9 +100,8 @@
     }
 
     .ctrl-btn.wide {
-      min-width: 7rem;
+      min-width: 6rem;
       font-size: 1.1rem;
-      flex: 1 1 0;
     }
 
     .ctrl-btn:active {
@@ -127,825 +120,388 @@
   <div id="gameContainer">
     <div id="gameArea">
       <canvas id="gameCanvas"></canvas>
-      <div id="uiOverlay">
-        <div id="infoBar">
-          <div><strong>Kindle Tank Game</strong></div>
-          <div>Arrows/WASD = move & turn • Space = FIRE • B = MINE • R/FIRE when dead = restart.</div>
-        </div>
+      <div id="infoBar">
+        <div><strong>Kindle Tetris</strong></div>
+        <div>◀ / ▶ = move • ▲ = rotate • ▼ = down • Space = drop • N = new game</div>
+        <div>Score, Lines, Level, and Time show at the top of the board.</div>
       </div>
     </div>
 
     <div id="touchControlsBar">
       <div id="touchControls">
         <div class="ctrl-row">
-          <button id="btnLeft" class="ctrl-btn">⟲</button>
-          <button id="btnForward" class="ctrl-btn">▲</button>
-          <button id="btnRight" class="ctrl-btn">⟳</button>
+          <button id="btnLeft" class="ctrl-btn">◀</button>
+          <button id="btnRight" class="ctrl-btn">▶</button>
+          <button id="btnRotate" class="ctrl-btn">⟳</button>
         </div>
         <div class="ctrl-row">
-          <button id="btnFire" class="ctrl-btn wide">FIRE</button>
-          <button id="btnMine" class="ctrl-btn wide">MINE</button>
+          <button id="btnDown" class="ctrl-btn wide">DOWN</button>
+          <button id="btnDrop" class="ctrl-btn wide">DROP</button>
+          <button id="btnNew" class="ctrl-btn wide">NEW</button>
         </div>
       </div>
     </div>
   </div>
 
   <script>
-    // ====== Canvas & grid setup ======
-    const canvas = document.getElementById("gameCanvas");
-    const ctx = canvas.getContext("2d");
+    // ===== Basic setup =====
+    var canvas = document.getElementById("gameCanvas");
+    var ctx = canvas.getContext("2d");
 
-    const TILE = 40;
-    let tileCols = 0;
-    let tileRows = 0;
-    let startCol = 0;
-    let startRow = 0;
+    var COLS = 10;
+    var ROWS = 20;
+    var board = [];
+    var cellSize = 20;
 
-    function tileCenterX(col) { return col * TILE + TILE / 2; }
-    function tileCenterY(row) { return row * TILE + TILE / 2; }
+    var currentShape = null;
+    var currentX = 0;
+    var currentY = 0;
 
-    // ====== Input & directions ======
-    const keys = { left: false, right: false, forward: false, fire: false, mine: false };
+    var dropInterval = 800; // ms between automatic drops (decreases with level)
+    var dropTimer = 0;
 
-    const DIRS = [
-      { angle: 0,           vx: 1,  vy: 0 },
-      { angle: Math.PI / 2, vx: 0,  vy: 1 },
-      { angle: Math.PI,     vx: -1, vy: 0 },
-      { angle: -Math.PI/2,  vx: 0,  vy: -1 }
+    var lastTime = 0;
+    var gameOver = false;
+
+    var score = 0;
+    var linesCleared = 0;
+    var level = 1;
+    var elapsedMs = 0; // timer
+
+    // Tetrominoes (shapes as matrices of 0/1)
+    var SHAPES = [
+      [[1,1,1,1]],                  // I
+      [[1,0,0],[1,1,1]],            // J
+      [[0,0,1],[1,1,1]],            // L
+      [[1,1],[1,1]],                // O
+      [[0,1,1],[1,1,0]],            // S
+      [[0,1,0],[1,1,1]],            // T
+      [[1,1,0],[0,1,1]]             // Z
     ];
 
-    // ====== Game state ======
-    const player = {
-      x: 0, y: 0,
-      dirIndex: 3,
-      radius: 14,
-      lives: 3,
-      alive: true
-    };
-
-    const bullets = [];
-    const targets = [];
-    const enemies = [];
-    const walls   = [];
-    const mines   = [];
-    const explosions = [];
-
-    let score = 0;
-    let fireCooldown = 0;
-    let mineCooldown = 0;
-    let enemySpawnCooldown = 0;
-
-    // ====== Helpers ======
-    function randRange(min, max) { return Math.random() * (max - min) + min; }
-
-    function distance(x1, y1, x2, y2) {
-      const dx = x2 - x1, dy = y2 - y1;
-      return Math.sqrt(dx * dx + dy * dy);
-    }
-
-    function clamp(v, min, max) {
-      if (v < min) return min;
-      if (v > max) return max;
-      return v;
-    }
-
-    function circleRectCollides(cx, cy, r, rect) {
-      const rx = rect.x;
-      const ry = rect.y;
-      const rw = rect.w;
-      const rh = rect.h;
-      const nearestX = Math.max(rx, Math.min(cx, rx + rw));
-      const nearestY = Math.max(ry, Math.min(cy, ry + rh));
-      const dx = cx - nearestX;
-      const dy = cy - nearestY;
-      return (dx * dx + dy * dy) <= r * r;
-    }
-
-    function positionHitsWall(x, y, radius) {
-      for (let i = 0; i < walls.length; i++) {
-        if (circleRectCollides(x, y, radius, walls[i])) return true;
-      }
-      return false;
-    }
-
-    function bulletHitsWall(b) {
-      for (let i = 0; i < walls.length; i++) {
-        const w = walls[i];
-        if (b.x >= w.x && b.x <= w.x + w.w && b.y >= w.y && b.y <= w.y + w.h) {
-          return true;
-        }
-      }
-      return false;
-    }
-
-    // Forward snap: next tile in facing direction (not nearest)
-    function snapTankForward(obj) {
-      const dir = DIRS[obj.dirIndex];
-      let xf = (obj.x - TILE / 2) / TILE;
-      let yf = (obj.y - TILE / 2) / TILE;
-      let col, row;
-
-      if (Math.abs(dir.vx) > 0) {
-        // moving horizontally – snap x forward, y to nearest row
-        col = dir.vx > 0 ? Math.ceil(xf) : Math.floor(xf);
-        row = Math.round(yf);
-      } else {
-        // moving vertically – snap y forward, x to nearest column
-        row = dir.vy > 0 ? Math.ceil(yf) : Math.floor(yf);
-        col = Math.round(xf);
-      }
-
-      col = clamp(col, 0, tileCols - 1);
-      row = clamp(row, 0, tileRows - 1);
-      obj.x = tileCenterX(col);
-      obj.y = tileCenterY(row);
-    }
-
-    // ====== Grid & walls ======
-    function recomputeGrid() {
-      tileCols = Math.max(8, Math.floor(canvas.width / TILE));
-      tileRows = Math.max(6, Math.floor(canvas.height / TILE));
-      startCol = Math.floor(tileCols / 2);
-      // spawn one row above the bottom wall band (which is at tileRows - 3)
-      startRow = tileRows - 4;
-      if (startRow < 1) startRow = 1;
-    }
-
-    function isWallTile(col, row) {
-      const x = col * TILE;
-      const y = row * TILE;
-      for (let i = 0; i < walls.length; i++) {
-        const w = walls[i];
-        if (w.x === x && w.y === y) return true;
-      }
-      return false;
-    }
-
-    function setupWalls() {
-      walls.length = 0;
-
-      const midC = Math.floor(tileCols / 2);
-      const midR = Math.floor(tileRows / 2);
-
-      // central T vertical
-      for (let r = midR - 2; r <= midR + 2; r++) {
-        if (r < 0 || r >= tileRows) continue;
-        walls.push({ x: midC * TILE, y: r * TILE, w: TILE, h: TILE });
-      }
-      // central T horizontal
-      for (let c = midC - 3; c <= midC + 3; c++) {
-        if (c < 0 || c >= tileCols || c === midC) continue;
-        walls.push({ x: c * TILE, y: midR * TILE, w: TILE, h: TILE });
-      }
-
-      // top & bottom scattered walls (bottom at row = tileRows - 3)
-      for (let c = 2; c < tileCols - 2; c += 3) {
-        if (!isWallTile(c, 2)) {
-          walls.push({ x: c * TILE, y: 2 * TILE, w: TILE, h: TILE });
-        }
-        const bottomRow = tileRows - 3;
-        if (bottomRow >= 0 && !isWallTile(c, bottomRow)) {
-          walls.push({ x: c * TILE, y: bottomRow * TILE, w: TILE, h: TILE });
-        }
-      }
-
-      // four corner blocks
-      const cornerTiles = [
-        { c: 1, r: 1 },
-        { c: tileCols - 2, r: 1 },
-        { c: 1, r: tileRows - 2 },
-        { c: tileCols - 2, r: tileRows - 2 }
-      ];
-      for (let i = 0; i < cornerTiles.length; i++) {
-        const ct = cornerTiles[i];
-        if (ct.c >= 0 && ct.c < tileCols && ct.r >= 0 && ct.r < tileRows) {
-          if (!isWallTile(ct.c, ct.r)) {
-            walls.push({ x: ct.c * TILE, y: ct.r * TILE, w: TILE, h: TILE });
-          }
-        }
-      }
-
-      // make sure spawn tile is not a wall
-      if (isWallTile(startCol, startRow)) {
-        // remove any wall that accidentally landed there
-        const sx = startCol * TILE;
-        const sy = startRow * TILE;
-        for (let i = walls.length - 1; i >= 0; i--) {
-          const w = walls[i];
-          if (w.x === sx && w.y === sy) {
-            walls.splice(i, 1);
-          }
-        }
+    function createBoard() {
+      board = [];
+      for (var r = 0; r < ROWS; r++) {
+        var row = [];
+        for (var c = 0; c < COLS; c++) row.push(0);
+        board.push(row);
       }
     }
 
     function resizeCanvas() {
-      const rect = canvas.getBoundingClientRect();
+      var rect = canvas.getBoundingClientRect();
       canvas.width = rect.width;
       canvas.height = rect.height;
-      recomputeGrid();
-      setupWalls();
+
+      var cw = canvas.width / COLS;
+      var ch = canvas.height / ROWS;
+      cellSize = Math.floor(Math.min(cw, ch));
+
+      render();
     }
 
     window.addEventListener("resize", resizeCanvas);
 
-    // ====== Spawning ======
-    function randomFreeTile(minDistanceFromPlayer) {
-      let attempts = 0;
-      while (attempts < 300) {
-        const col = Math.floor(Math.random() * tileCols);
-        const row = Math.floor(Math.random() * tileRows);
-        attempts++;
-
-        if (isWallTile(col, row)) continue;
-
-        const x = tileCenterX(col);
-        const y = tileCenterY(row);
-
-        if (distance(x, y, player.x, player.y) < minDistanceFromPlayer) continue;
-        if (col <= 0 || col >= tileCols - 1 || row <= 0 || row >= tileRows - 1) continue;
-
-        return { col, row, x, y };
-      }
-      return { col: 1, row: 1, x: tileCenterX(1), y: tileCenterY(1) };
+    // ===== Input handling =====
+    function moveLeft() {
+      if (gameOver) return;
+      if (!collides(currentX - 1, currentY, currentShape)) currentX--;
     }
 
-    function spawnTarget() {
-      const spot = randomFreeTile(TILE * 3);
-      targets.push({ x: spot.x, y: spot.y, radius: 18 });
+    function moveRight() {
+      if (gameOver) return;
+      if (!collides(currentX + 1, currentY, currentShape)) currentX++;
     }
 
-    function ensureTargets(count) {
-      while (targets.length < count) spawnTarget();
-    }
-
-    function spawnEnemy() {
-      const spot = randomFreeTile(TILE * 4);
-      enemies.push({
-        x: spot.x,
-        y: spot.y,
-        dirIndex: Math.floor(Math.random() * 4),
-        radius: 14,
-        shootCooldown: 2 + Math.random(),
-        moveTimer: 0
-      });
-    }
-
-    function ensureEnemies(count) {
-      while (enemies.length < count) spawnEnemy();
-    }
-
-    // ====== Input: keyboard ======
-    document.addEventListener("keydown", function(e) {
-      let handled = false;
-      if (e.key === "r" || e.key === "R") {
-        resetGame();
-        handled = true;
+    function moveDown() {
+      if (gameOver) return;
+      if (!collides(currentX, currentY + 1, currentShape)) {
+        currentY++;
       } else {
-        switch (e.key) {
-          case "ArrowLeft":
-          case "a":
-          case "A":
-            keys.left = true; handled = true; break;
-          case "ArrowRight":
-          case "d":
-          case "D":
-            keys.right = true; handled = true; break;
-          case "ArrowUp":
-          case "w":
-          case "W":
-            keys.forward = true; handled = true; break;
-          case " ":
-          case "Spacebar":
-            keys.fire = true; handled = true; break;
-          case "b":
-          case "B":
-            keys.mine = true; handled = true; break;
-        }
+        lockPiece();
+        spawnPiece();
       }
-      if (handled) e.preventDefault();
-    });
+    }
 
-    document.addEventListener("keyup", function(e) {
-      let handled = false;
+    function hardDrop() {
+      if (gameOver) return;
+      while (!collides(currentX, currentY + 1, currentShape)) currentY++;
+      lockPiece();
+      spawnPiece();
+    }
+
+    function rotatePiece() {
+      if (gameOver) return;
+      var rotated = rotateMatrix(currentShape);
+      if (!collides(currentX, currentY, rotated)) currentShape = rotated;
+    }
+
+    document.addEventListener("keydown", function(e) {
+      var handled = false;
       switch (e.key) {
-        case "ArrowLeft":
-        case "a":
-        case "A":
-          keys.left = false; handled = true; break;
-        case "ArrowRight":
-        case "d":
-        case "D":
-          keys.right = false; handled = true; break;
-        case "ArrowUp":
-        case "w":
-        case "W":
-          keys.forward = false; handled = true; break;
+        case "ArrowLeft": case "a": case "A":
+          moveLeft(); handled = true; break;
+        case "ArrowRight": case "d": case "D":
+          moveRight(); handled = true; break;
+        case "ArrowUp": case "w": case "W":
+          rotatePiece(); handled = true; break;
+        case "ArrowDown": case "s": case "S":
+          moveDown(); handled = true; break;
         case " ":
-        case "Spacebar":
-          keys.fire = false; handled = true; break;
-        case "b":
-        case "B":
-          keys.mine = false; handled = true; break;
+          hardDrop(); handled = true; break;
+        case "n": case "N":
+          newGame(); handled = true; break;
       }
       if (handled) e.preventDefault();
     });
 
-    // ====== Input: touch buttons ======
-    function bindButton(btnId, keyName) {
-      const btn = document.getElementById(btnId);
+    function bindButton(id, action) {
+      var btn = document.getElementById(id);
       if (!btn) return;
-
-      const down = function(ev) { ev.preventDefault(); keys[keyName] = true; };
-      const up   = function(ev) { ev.preventDefault(); keys[keyName] = false; };
-
-      btn.addEventListener("touchstart", down, { passive: false });
-      btn.addEventListener("touchend", up, { passive: false });
-      btn.addEventListener("touchcancel", up, { passive: false });
-
+      var down = function(ev) { ev.preventDefault(); action(); };
+      btn.addEventListener("touchstart", down, { passive:false });
       btn.addEventListener("mousedown", down);
-      document.addEventListener("mouseup", function() { keys[keyName] = false; });
     }
 
-    bindButton("btnLeft", "left");
-    bindButton("btnRight", "right");
-    bindButton("btnForward", "forward");
-    bindButton("btnFire", "fire");
-    bindButton("btnMine", "mine");
+    bindButton("btnLeft", moveLeft);
+    bindButton("btnRight", moveRight);
+    bindButton("btnDown", moveDown);
+    bindButton("btnRotate", rotatePiece);
+    bindButton("btnDrop", hardDrop);
+    bindButton("btnNew", newGame);
 
-    // ====== Weapons & mines ======
-    function fireBullet(source, speed, fromEnemy) {
-      const dir = DIRS[source.dirIndex];
-      const bx = source.x + dir.vx * (source.radius + 6);
-      const by = source.y + dir.vy * (source.radius + 6);
-      bullets.push({
-        x: bx,
-        y: by,
-        vx: dir.vx * speed,
-        vy: dir.vy * speed,
-        life: 0,
-        fromEnemy: !!fromEnemy
-      });
-    }
-
-    function dropMine() {
-      if (mines.length >= 3) return;
-      mines.push({ x: player.x, y: player.y, timer: 0, armed: false });
-    }
-
-    function explodeMine(index) {
-      const m = mines[index];
-      const blastRadius = TILE * 2;
-
-      explosions.push({ x: m.x, y: m.y, age: 0, duration: 0.35 });
-
-      for (let i = enemies.length - 1; i >= 0; i--) {
-        const e = enemies[i];
-        if (distance(m.x, m.y, e.x, e.y) < blastRadius) {
-          enemies.splice(i, 1);
-          score += 3;
+    // ===== Core Tetris logic =====
+    function rotateMatrix(matrix) {
+      var rows = matrix.length;
+      var cols = matrix[0].length;
+      var result = [];
+      for (var c = 0; c < cols; c++) {
+        result[c] = [];
+        for (var r = rows - 1; r >= 0; r--) {
+          result[c].push(matrix[r][c]);
         }
       }
+      return result;
+    }
 
-      if (player.alive && distance(m.x, m.y, player.x, player.y) < blastRadius) {
-        hitPlayer();
+    function collides(nx, ny, shape) {
+      var rows = shape.length;
+      var cols = shape[0].length;
+      for (var r = 0; r < rows; r++) {
+        for (var c = 0; c < cols; c++) {
+          if (!shape[r][c]) continue;
+          var x = nx + c;
+          var y = ny + r;
+          if (x < 0 || x >= COLS || y >= ROWS) return true;
+          if (y >= 0 && board[y][x]) return true;
+        }
       }
-
-      mines.splice(index, 1);
+      return false;
     }
 
-    function hitPlayer() {
-      if (!player.alive) return;
-      player.lives--;
-      if (player.lives <= 0) player.alive = false;
+    function lockPiece() {
+      var rows = currentShape.length;
+      var cols = currentShape[0].length;
+      for (var r = 0; r < rows; r++) {
+        for (var c = 0; c < cols; c++) {
+          if (currentShape[r][c]) {
+            var x = currentX + c;
+            var y = currentY + r;
+            if (y >= 0 && y < ROWS && x >= 0 && x < COLS) {
+              board[y][x] = 1;
+            } else {
+              gameOver = true;
+            }
+          }
+        }
+      }
+      clearLines();
     }
 
-    // ====== Reset ======
-    function resetGame() {
-      player.x = tileCenterX(startCol);
-      player.y = tileCenterY(startRow);
-      player.dirIndex = 3;
-      player.radius = 14;
-      player.lives = 3;
-      player.alive = true;
+    function clearLines() {
+      var lines = 0;
+      for (var r = ROWS - 1; r >= 0; r--) {
+        var full = true;
+        for (var c = 0; c < COLS; c++) {
+          if (!board[r][c]) { full = false; break; }
+        }
+        if (full) {
+          board.splice(r, 1);
+          var newRow = [];
+          for (var cc = 0; cc < COLS; cc++) newRow.push(0);
+          board.unshift(newRow);
+          lines++;
+          r++;
+        }
+      }
+      if (lines > 0) {
+        linesCleared += lines;
+        // basic scoring, classic-ish: 1/2/3/4 lines at once
+        var lineScore = [0,100,300,500,800];
+        score += lineScore[Math.min(lines,4)] * level;
 
-      bullets.length = 0;
-      targets.length = 0;
-      enemies.length = 0;
-      mines.length = 0;
-      explosions.length = 0;
+        var newLevel = 1 + Math.floor(linesCleared / 10);
+        if (newLevel !== level) {
+          level = newLevel;
+          // speed up with level, but keep a floor
+          dropInterval = Math.max(150, 800 - (level - 1) * 70);
+        }
+      }
+    }
 
+    function randomShape() {
+      var idx = Math.floor(Math.random() * SHAPES.length);
+      var shape = SHAPES[idx];
+      var rows = shape.length;
+      var cols = shape[0].length;
+      var copy = [];
+      for (var r = 0; r < rows; r++) {
+        copy[r] = [];
+        for (var c = 0; c < cols; c++) copy[r][c] = shape[r][c];
+      }
+      return copy;
+    }
+
+    function spawnPiece() {
+      currentShape = randomShape();
+      currentY = -2;
+      currentX = Math.floor((COLS - currentShape[0].length) / 2);
+      if (collides(currentX, currentY, currentShape)) {
+        gameOver = true;
+      }
+    }
+
+    function newGame() {
+      createBoard();
       score = 0;
-      fireCooldown = 0;
-      mineCooldown = 0;
-      enemySpawnCooldown = 0;
-
-      ensureTargets(4);
-      ensureEnemies(2);
+      linesCleared = 0;
+      level = 1;
+      dropInterval = 800;
+      elapsedMs = 0;
+      gameOver = false;
+      spawnPiece();
     }
 
-    // ====== Update ======
-    function update(dt) {
-      if (!player.alive) {
-        if (keys.fire) { keys.fire = false; resetGame(); }
-        updateBullets(dt);
-        updateEnemies(dt);
-        updateMines(dt);
-        updateExplosions(dt);
-        return;
-      }
-
-      const moveSpeed = 100;
-
-      // rotation
-      if (keys.left) {
-        keys.left = false;
-        player.dirIndex = (player.dirIndex + 3) % 4;
-      }
-      if (keys.right) {
-        keys.right = false;
-        player.dirIndex = (player.dirIndex + 1) % 4;
-      }
-
-      // movement
-      let oldX = player.x;
-      let oldY = player.y;
-      if (keys.forward) {
-        const dir = DIRS[player.dirIndex];
-        player.x += dir.vx * moveSpeed * dt;
-        player.y += dir.vy * moveSpeed * dt;
-      }
-
-      const margin = player.radius + 3;
-      player.x = clamp(player.x, margin, canvas.width - margin);
-      player.y = clamp(player.y, margin, canvas.height - margin);
-
-      if (positionHitsWall(player.x, player.y, player.radius)) {
-        player.x = oldX;
-        player.y = oldY;
-      }
-
-      // forward snap to next tile when not pressing forward
-      if (!keys.forward) {
-        const sx = player.x;
-        const sy = player.y;
-        snapTankForward(player);
-        if (positionHitsWall(player.x, player.y, player.radius)) {
-          player.x = sx;
-          player.y = sy;
-        }
-      }
-
-      fireCooldown -= dt;
-      if (fireCooldown < 0) fireCooldown = 0;
-      if (keys.fire && fireCooldown === 0) {
-        fireBullet(player, 220, false);
-        fireCooldown = 0.45;
-      }
-
-      mineCooldown -= dt;
-      if (mineCooldown < 0) mineCooldown = 0;
-      if (keys.mine && mineCooldown === 0) {
-        dropMine();
-        mineCooldown = 1.0;
-      }
-
-      updateMines(dt);
-      updateBullets(dt);
-      updateEnemies(dt);
-      updateExplosions(dt);
-
-      ensureTargets(4);
-      enemySpawnCooldown -= dt;
-      if (enemySpawnCooldown < 0) {
-        enemySpawnCooldown = 7 + Math.random() * 3;
-        if (enemies.length < 3) spawnEnemy();
-      }
+    // ===== Rendering =====
+    function clearCanvas() {
+      ctx.fillStyle = "#f4f2ea";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
 
-    function updateMines(dt) {
-      for (let i = mines.length - 1; i >= 0; i--) {
-        const m = mines[i];
-        m.timer += dt;
-        if (!m.armed && m.timer > 0.7) m.armed = true;
-        if (m.timer > 4) {
-          explodeMine(i);
-        } else if (m.armed) {
-          for (let j = enemies.length - 1; j >= 0; j--) {
-            const e = enemies[j];
-            if (distance(m.x, m.y, e.x, e.y) < TILE * 1.3) {
-              explodeMine(i);
-              break;
-            }
-          }
-          if (i >= mines.length) continue;
-          if (player.alive && distance(m.x, m.y, player.x, player.y) < TILE * 1.3) {
-            explodeMine(i);
-          }
-        }
-      }
-    }
-
-    function updateBullets(dt) {
-      for (let i = bullets.length - 1; i >= 0; i--) {
-        const b = bullets[i];
-        b.x += b.vx * dt;
-        b.y += b.vy * dt;
-        b.life += dt;
-
-        if (
-          b.x < -20 || b.x > canvas.width + 20 ||
-          b.y < -20 || b.y > canvas.height + 20 ||
-          b.life > 4 ||
-          bulletHitsWall(b)
-        ) {
-          bullets.splice(i, 1);
-          continue;
-        }
-
-        if (b.fromEnemy && player.alive) {
-          if (distance(b.x, b.y, player.x, player.y) < player.radius) {
-            bullets.splice(i, 1);
-            hitPlayer();
-            continue;
-          }
-        } else if (!b.fromEnemy) {
-          let hit = false;
-
-          for (let j = targets.length - 1; j >= 0; j--) {
-            const t = targets[j];
-            if (distance(b.x, b.y, t.x, t.y) < t.radius) {
-              targets.splice(j, 1);
-              score += 1;
-              hit = true;
-              break;
-            }
-          }
-          if (hit) {
-            bullets.splice(i, 1);
-            continue;
-          }
-
-          for (let k = enemies.length - 1; k >= 0; k--) {
-            const e = enemies[k];
-            if (distance(b.x, b.y, e.x, e.y) < e.radius) {
-              enemies.splice(k, 1);
-              score += 2;
-              hit = true;
-              break;
-            }
-          }
-          if (hit) {
-            bullets.splice(i, 1);
-            continue;
-          }
-        }
-      }
-    }
-
-    function updateEnemies(dt) {
-      const speed = 70;
-      for (let i = 0; i < enemies.length; i++) {
-        const e = enemies[i];
-
-        e.moveTimer += dt;
-        if (e.moveTimer > 0.25) {
-          e.moveTimer = 0;
-          const dx = player.x - e.x;
-          const dy = player.y - e.y;
-          if (Math.abs(dx) > Math.abs(dy)) {
-            e.dirIndex = dx > 0 ? 0 : 2;
-          } else {
-            e.dirIndex = dy > 0 ? 1 : 3;
-          }
-        }
-
-        const dir = DIRS[e.dirIndex];
-        const oldX = e.x;
-        const oldY = e.y;
-
-        e.x += dir.vx * speed * dt;
-        e.y += dir.vy * speed * dt;
-
-        const r = e.radius + 3;
-        e.x = clamp(e.x, r, canvas.width - r);
-        e.y = clamp(e.y, r, canvas.height - r);
-
-        if (positionHitsWall(e.x, e.y, e.radius)) {
-          e.x = oldX;
-          e.y = oldY;
-          e.dirIndex = (e.dirIndex + 1 + Math.floor(Math.random() * 3)) % 4;
-        }
-
-        if (player.alive && distance(e.x, e.y, player.x, player.y) < e.radius + player.radius - 3) {
-          hitPlayer();
-        }
-
-        e.shootCooldown -= dt;
-        if (e.shootCooldown < 0) e.shootCooldown = 0;
-
-        if (e.shootCooldown === 0 && player.alive) {
-          const dx = player.x - e.x;
-          const dy = player.y - e.y;
-          const dirVec = DIRS[e.dirIndex];
-
-          const alignedRow = Math.abs(dy) < 20 && Math.sign(dx) === dirVec.vx;
-          const alignedCol = Math.abs(dx) < 20 && Math.sign(dy) === dirVec.vy;
-
-          if ((alignedRow || alignedCol) && distance(e.x, e.y, player.x, player.y) < TILE * 8) {
-            let clear = true;
-            const steps = 10;
-            for (let s = 1; s < steps; s++) {
-              const tx = e.x + (dx / steps) * s;
-              const ty = e.y + (dy / steps) * s;
-              if (positionHitsWall(tx, ty, 3)) {
-                clear = false;
-                break;
-              }
-            }
-
-            if (clear) {
-              fireBullet(e, 80, true);
-              e.shootCooldown = 2.5 + Math.random();
-            }
-          }
-        }
-      }
-    }
-
-    function updateExplosions(dt) {
-      for (let i = explosions.length - 1; i >= 0; i--) {
-        const ex = explosions[i];
-        ex.age += dt;
-        if (ex.age > ex.duration) {
-          explosions.splice(i, 1);
-        }
-      }
-    }
-
-    // ====== Drawing ======
-    function drawGrid() {
+    function drawGrid(offsetX, offsetY) {
       ctx.strokeStyle = "#d5cfbf";
       ctx.lineWidth = 1;
-      ctx.beginPath();
-      for (let x = 0; x < canvas.width; x += TILE) {
-        ctx.moveTo(x + 0.5, 0);
-        ctx.lineTo(x + 0.5, canvas.height);
-      }
-      for (let y = 0; y < canvas.height; y += TILE) {
-        ctx.moveTo(0, y + 0.5);
-        ctx.lineTo(canvas.width, y + 0.5);
-      }
-      ctx.stroke();
-    }
-
-    function drawWalls() {
-      ctx.fillStyle = "#b0a896";
-      ctx.strokeStyle = "#8b8476";
-      ctx.lineWidth = 1;
-      for (let i = 0; i < walls.length; i++) {
-        const w = walls[i];
-        ctx.fillRect(w.x, w.y, w.w, w.h);
-        ctx.strokeRect(w.x, w.y, w.w, w.h);
-      }
-    }
-
-    function drawTank(x, y, dirIndex, bodyColor, turretColor) {
-      const dir = DIRS[dirIndex];
-      ctx.save();
-      ctx.translate(x, y);
-      ctx.rotate(dir.angle);
-
-      ctx.fillStyle = bodyColor;
-      ctx.strokeStyle = "#444";
-      ctx.lineWidth = 1.5;
-      ctx.fillRect(-14, -14, 28, 28);
-      ctx.strokeRect(-14, -14, 28, 28);
-
-      ctx.fillStyle = turretColor;
-      ctx.fillRect(0, -4, 18, 8);
-
-      ctx.restore();
-    }
-
-    function drawMines() {
-      for (let i = 0; i < mines.length; i++) {
-        const m = mines[i];
+      for (var c = 0; c <= COLS; c++) {
+        var x = offsetX + c * cellSize + 0.5;
         ctx.beginPath();
-        ctx.fillStyle = m.armed ? "#555" : "#999";
-        ctx.arc(m.x, m.y, 6, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-
-    function drawExplosions() {
-      for (let i = 0; i < explosions.length; i++) {
-        const ex = explosions[i];
-        const t = ex.age / ex.duration;
-        const radius = TILE * (1.2 + t * 1.0);
-        ctx.save();
-        ctx.globalAlpha = 0.3 * (1 - t);
-        ctx.fillStyle = "#444";
-        ctx.beginPath();
-        ctx.arc(ex.x, ex.y, radius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-      }
-    }
-
-    function drawPlayer() {
-      drawTank(player.x, player.y, player.dirIndex, "#4a7c59", "#385d42");
-    }
-
-    function drawEnemies() {
-      for (let i = 0; i < enemies.length; i++) {
-        const e = enemies[i];
-        drawTank(e.x, e.y, e.dirIndex, "#8b3a3a", "#5f2626");
-      }
-    }
-
-    function drawTargets() {
-      for (let i = 0; i < targets.length; i++) {
-        const t = targets[i];
-        ctx.beginPath();
-        ctx.fillStyle = "#c99b2b";
-        ctx.strokeStyle = "#8a6b1a";
-        ctx.lineWidth = 2;
-        ctx.arc(t.x, t.y, t.radius, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.moveTo(x, offsetY);
+        ctx.lineTo(x, offsetY + ROWS * cellSize);
         ctx.stroke();
-
+      }
+      for (var r = 0; r <= ROWS; r++) {
+        var y = offsetY + r * cellSize + 0.5;
         ctx.beginPath();
-        ctx.moveTo(t.x - t.radius / 2, t.y);
-        ctx.lineTo(t.x + t.radius / 2, t.y);
-        ctx.moveTo(t.x, t.y - t.radius / 2);
-        ctx.lineTo(t.x, t.y + t.radius / 2);
+        ctx.moveTo(offsetX, y);
+        ctx.lineTo(offsetX + COLS * cellSize, y);
         ctx.stroke();
       }
     }
 
-    function drawBullets() {
-      for (let i = 0; i < bullets.length; i++) {
-        const b = bullets[i];
-        ctx.beginPath();
-        ctx.fillStyle = b.fromEnemy ? "#333" : "#111";
-        ctx.arc(b.x, b.y, 3, 0, Math.PI * 2);
-        ctx.fill();
+    function drawBoard(offsetX, offsetY) {
+      for (var r = 0; r < ROWS; r++) {
+        for (var c = 0; c < COLS; c++) {
+          if (board[r][c]) drawCell(offsetX, offsetY, c, r, "#555");
+        }
       }
     }
 
-    function drawHUD() {
+    function drawCell(offsetX, offsetY, col, row, color) {
+      var x = offsetX + col * cellSize;
+      var y = offsetY + row * cellSize;
+      ctx.fillStyle = color;
+      ctx.fillRect(x + 1, y + 1, cellSize - 2, cellSize - 2);
+    }
+
+    function drawCurrent(offsetX, offsetY) {
+      if (!currentShape) return;
+      var rows = currentShape.length;
+      var cols = currentShape[0].length;
+      for (var r = 0; r < rows; r++) {
+        for (var c = 0; c < cols; c++) {
+          if (currentShape[r][c]) {
+            var x = currentX + c;
+            var y = currentY + r;
+            if (y >= 0) drawCell(offsetX, offsetY, x, y, "#222");
+          }
+        }
+      }
+    }
+
+    function drawHUD(offsetX) {
       ctx.fillStyle = "#111";
-      ctx.font = "14px system-ui, sans-serif";
+      ctx.font = "15px system-ui, sans-serif";
       ctx.textBaseline = "top";
-      ctx.fillText("Score: " + score, 10, 8);
-      ctx.fillText("Lives: " + player.lives, 10, 26);
 
-      if (!player.alive) {
-        const msg = "You were hit! Press R or FIRE to restart.";
+      var seconds = Math.floor(elapsedMs / 1000);
+      var mm = String(Math.floor(seconds / 60)).padStart(2,"0");
+      var ss = String(seconds % 60).padStart(2,"0");
+      var timeStr = mm + ":" + ss;
+
+      var text = "Score: " + score +
+                 "   Lines: " + linesCleared +
+                 "   Level: " + level +
+                 "   Time: " + timeStr;
+      ctx.fillText(text, offsetX, 10);
+
+      if (gameOver) {
+        var msg = "Game over – press N or NEW to restart";
         ctx.font = "16px system-ui, sans-serif";
-        const w = ctx.measureText(msg).width;
-        ctx.fillText(msg, (canvas.width - w) / 2, canvas.height / 2 - 10);
+        var w = ctx.measureText(msg).width;
+        var x = offsetX + (COLS * cellSize - w) / 2;
+        var y = 40;
+        ctx.fillText(msg, x, y);
       }
     }
 
     function render() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      drawGrid();
-      drawWalls();
-      drawTargets();
-      drawEnemies();
-      drawBullets();
-      drawMines();
-      drawExplosions();
-      drawPlayer();
-      drawHUD();
+      clearCanvas();
+      var boardWidth = COLS * cellSize;
+      var boardHeight = ROWS * cellSize;
+      var offsetX = Math.floor((canvas.width - boardWidth) / 2);
+      var offsetY = Math.floor((canvas.height - boardHeight) / 2) + 20; // push board slightly down
+
+      drawGrid(offsetX, offsetY);
+      drawBoard(offsetX, offsetY);
+      drawCurrent(offsetX, offsetY);
+      drawHUD(offsetX);
     }
 
-    // ====== Game loop ======
-    let lastTime = 0;
-    let accumulator = 0;
-    const STEP = 1 / 6;
+    // ===== Game loop =====
+    function update(dtMs) {
+      if (!gameOver) {
+        elapsedMs += dtMs;
+        dropTimer += dtMs;
+        if (dropTimer >= dropInterval) {
+          dropTimer = 0;
+          moveDown();
+        }
+      }
+    }
 
     function gameLoop(timestamp) {
       if (!lastTime) lastTime = timestamp;
-      let dt = (timestamp - lastTime) / 1000;
-      if (dt > 0.25) dt = 0.25;
+      var dtMs = timestamp - lastTime;
       lastTime = timestamp;
-      accumulator += dt;
 
-      while (accumulator >= STEP) {
-        update(STEP);
-        accumulator -= STEP;
-      }
-
+      update(dtMs);
       render();
       requestAnimationFrame(gameLoop);
     }
 
-    // ====== Start game ======
+    // ===== Init =====
+    createBoard();
     resizeCanvas();
-    resetGame();
+    newGame();
     requestAnimationFrame(gameLoop);
   </script>
 </body>
