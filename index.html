@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Kindle Tank Game</title>
+  <title>Kindle Tank Game (Scribe)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <style>
     * {
@@ -33,7 +33,7 @@
     #gameCanvas {
       display: block;
       width: 100%;
-      height: calc(100% - 7rem); /* leave room for big buttons */
+      height: calc(100% - 7rem); /* room for controls */
       background: #f4f2ea;
       border-bottom: 1px solid #c0b9aa;
     }
@@ -76,15 +76,19 @@
       justify-content: center;
       gap: 0.6rem;
       width: 100%;
+      max-width: 420px;      /* <<< keeps controls in a centered column */
+      margin: 0 auto;
     }
 
     .ctrl-row {
       display: flex;
       justify-content: center;
       gap: 1rem;
+      width: 100%;
     }
 
     .ctrl-btn {
+      flex: 1 1 auto;
       min-width: 4.5rem;
       min-height: 4.5rem;
       border-radius: 1.2rem;
@@ -101,6 +105,7 @@
     .ctrl-btn.wide {
       min-width: 10rem;
       font-size: 1.2rem;
+      flex: 0 0 auto;
     }
 
     .ctrl-btn:active {
@@ -128,7 +133,7 @@
       <div id="infoBar">
         <div><strong>Kindle Tank Game</strong></div>
         <div id="infoText">
-          Arrows/WASD to turn & move, Space to shoot, R to restart. Big buttons for touch.
+          Arrows/WASD to turn &amp; move, Space to shoot, R or FIRE to restart.
         </div>
       </div>
 
@@ -149,7 +154,7 @@
   </div>
 
   <script>
-    // ======== Basic setup ========
+    // ======== Canvas setup ========
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
 
@@ -159,19 +164,13 @@
       canvas.width = rect.width;
       canvas.height = rect.height - controlsHeight;
     }
-
     window.addEventListener("resize", resizeCanvas);
     resizeCanvas();
 
-    const keys = {
-      left: false,
-      right: false,
-      forward: false,
-      shoot: false
-    };
+    // ======== Input state ========
+    const keys = { left: false, right: false, forward: false, shoot: false };
 
-    // ======== Directions (90° steps) ========
-    // 0: right, 1: down, 2: left, 3: up
+    // Directions (90° steps): 0 right, 1 down, 2 left, 3 up
     const DIRS = [
       { angle: 0, vx: 1, vy: 0 },
       { angle: Math.PI / 2, vx: 0, vy: 1 },
@@ -183,35 +182,30 @@
     const player = {
       x: canvas.width / 2,
       y: canvas.height / 2,
-      dirIndex: 3, // start facing up
+      dirIndex: 3,
       radius: 14,
       lives: 3,
       alive: true
     };
 
-    const bullets = []; // both player & enemies
-    const targets = []; // stationary targets
-    const enemies = []; // enemy tanks
+    const bullets = []; // player & enemies
+    const targets = [];
+    const enemies = [];
 
     let score = 0;
     let shootCooldown = 0;
     let enemySpawnCooldown = 0;
 
-    function randRange(min, max) {
-      return Math.random() * (max - min) + min;
-    }
-
+    function randRange(min, max) { return Math.random() * (max - min) + min; }
     function distance(x1, y1, x2, y2) {
-      const dx = x2 - x1;
-      const dy = y2 - y1;
+      const dx = x2 - x1, dy = y2 - y1;
       return Math.sqrt(dx * dx + dy * dy);
     }
 
     // ======== Spawning ========
     function spawnTarget() {
       const radius = 18;
-      let attempts = 0;
-      let x, y;
+      let x, y, attempts = 0;
       do {
         x = randRange(radius, canvas.width - radius);
         y = randRange(radius, canvas.height - radius);
@@ -222,91 +216,58 @@
     }
 
     function ensureTargets(count) {
-      while (targets.length < count) {
-        spawnTarget();
-      }
+      while (targets.length < count) spawnTarget();
     }
 
     function spawnEnemy() {
       const margin = 20;
-      const side = Math.floor(Math.random() * 4); // 0 top, 1 right, 2 bottom, 3 left
+      const side = Math.floor(Math.random() * 4);
       let x, y;
       if (side === 0) {
-        x = randRange(margin, canvas.width - margin);
-        y = margin;
+        x = randRange(margin, canvas.width - margin); y = margin;
       } else if (side === 1) {
-        x = canvas.width - margin;
-        y = randRange(margin, canvas.height - margin);
+        x = canvas.width - margin; y = randRange(margin, canvas.height - margin);
       } else if (side === 2) {
-        x = randRange(margin, canvas.width - margin);
-        y = canvas.height - margin;
+        x = randRange(margin, canvas.width - margin); y = canvas.height - margin;
       } else {
-        x = margin;
-        y = randRange(margin, canvas.height - margin);
+        x = margin; y = randRange(margin, canvas.height - margin);
       }
-
       enemies.push({
-        x,
-        y,
-        dirIndex: 1, // arbitrary initial direction
+        x, y,
+        dirIndex: 1,
         radius: 14,
-        shootCooldown: 1.5 + Math.random(), // sec
-        moveTimer: 0.0
+        shootCooldown: 2 + Math.random(),
+        moveTimer: 0
       });
     }
 
     function ensureEnemies(count) {
-      while (enemies.length < count) {
-        spawnEnemy();
-      }
+      while (enemies.length < count) spawnEnemy();
     }
 
-    // ======== Input: keyboard ========
-    document.addEventListener("keydown", (e) => {
+    // ======== Keyboard ========
+    document.addEventListener("keydown", e => {
       let handled = false;
       if (e.key === "r" || e.key === "R") {
-        resetGame();
-        handled = true;
+        resetGame(); handled = true;
       } else {
         switch (e.key) {
-          case "ArrowLeft":
-          case "a":
-          case "A":
-            keys.left = true; handled = true; break;
-          case "ArrowRight":
-          case "d":
-          case "D":
-            keys.right = true; handled = true; break;
-          case "ArrowUp":
-          case "w":
-          case "W":
-            keys.forward = true; handled = true; break;
-          case " ":
-          case "Spacebar":
-            keys.shoot = true; handled = true; break;
+          case "ArrowLeft": case "a": case "A": keys.left = true; handled = true; break;
+          case "ArrowRight": case "d": case "D": keys.right = true; handled = true; break;
+          case "ArrowUp": case "w": case "W": keys.forward = true; handled = true; break;
+          case " ": case "Spacebar": keys.shoot = true; handled = true; break;
         }
       }
       if (handled) e.preventDefault();
     });
 
-    document.addEventListener("keyup", (e) => {
+    document.addEventListener("keyup", e => {
       let handled = false;
       switch (e.key) {
-        case "ArrowLeft":
-        case "a":
-        case "A":
-          keys.left = false; handled = true; break;
-        case "ArrowRight":
-        case "d":
-        case "D":
-          keys.right = false; handled = true; break;
-        case "ArrowUp":
-        case "w":
-        case "W":
-          keys.forward = false; handled = true; break;
-        case " ":
-        case "Spacebar":
-          keys.shoot = false; handled = true; break;
+        case "ArrowLeft": case "a": case "A": keys.left = false; handled = true; break;
+        case "ArrowRight": case "d": case "D": keys.right = false; handled = true; break;
+        case "ArrowUp": case "w": case "W": keys.forward = false; handled = true; break;
+        case " ": case "Spacebar": keys.shoot = false; handled = true; break;
       }
       if (handled) e.preventDefault();
     });
@@ -316,25 +277,15 @@
       const btn = document.getElementById(buttonId);
       if (!btn) return;
 
-      const activate = (ev) => {
-        ev.preventDefault();
-        keys[keyName] = true;
-      };
-      const deactivate = (ev) => {
-        ev.preventDefault();
-        keys[keyName] = false;
-      };
+      const activate = ev => { ev.preventDefault(); keys[keyName] = true; };
+      const deactivate = ev => { ev.preventDefault(); keys[keyName] = false; };
 
       btn.addEventListener("touchstart", activate, { passive: false });
       btn.addEventListener("touchend", deactivate, { passive: false });
       btn.addEventListener("touchcancel", deactivate, { passive: false });
 
-      btn.addEventListener("mousedown", (ev) => {
-        activate(ev);
-      });
-      document.addEventListener("mouseup", (ev) => {
-        keys[keyName] = false;
-      });
+      btn.addEventListener("mousedown", activate);
+      document.addEventListener("mouseup", () => { keys[keyName] = false; });
     }
 
     bindControl("btnLeft", "left");
@@ -347,10 +298,8 @@
       const dir = DIRS[source.dirIndex];
       const bx = source.x + dir.vx * (source.radius + 6);
       const by = source.y + dir.vy * (source.radius + 6);
-
       bullets.push({
-        x: bx,
-        y: by,
+        x: bx, y: by,
         vx: dir.vx * speed,
         vy: dir.vy * speed,
         life: 0,
@@ -375,22 +324,27 @@
       ensureEnemies(2);
     }
 
-    // ======== Game loop ========
-    let lastTime = 0;
+    function hitPlayer() {
+      if (!player.alive) return;
+      player.lives--;
+      if (player.lives <= 0) player.alive = false;
+    }
 
+    // ======== Update logic (discrete steps for e-ink) ========
     function update(dt) {
+      // if dead, allow FIRE to restart
       if (!player.alive) {
-        // still update bullets so they disappear, but no movement
+        if (keys.shoot) { keys.shoot = false; resetGame(); }
         updateBullets(dt);
         return;
       }
 
-      const moveSpeed = 120; // px/s, slow for e-ink
-      const rotStep = 1; // dir index step
+      const moveSpeed = 90;  // px/s, slower for Scribe
+      const rotStep = 1;
 
-      // rotation in 90° steps
+      // 90° step rotation
       if (keys.left) {
-        keys.left = false; // single step per press/tap
+        keys.left = false;
         player.dirIndex = (player.dirIndex - rotStep + 4) % 4;
       }
       if (keys.right) {
@@ -405,7 +359,7 @@
         player.y += dir.vy * moveSpeed * dt;
       }
 
-      // bounds
+      // keep inside bounds
       const margin = player.radius + 2;
       if (player.x < margin) player.x = margin;
       if (player.x > canvas.width - margin) player.x = canvas.width - margin;
@@ -413,11 +367,10 @@
       if (player.y > canvas.height - margin) player.y = canvas.height - margin;
 
       // shooting
-      shootCooldown -= dt;
-      if (shootCooldown < 0) shootCooldown = 0;
+      shootCooldown -= dt; if (shootCooldown < 0) shootCooldown = 0;
       if (keys.shoot && shootCooldown === 0) {
-        fireBullet(player, 220, false);
-        shootCooldown = 0.45;
+        fireBullet(player, 200, false);
+        shootCooldown = 0.5;
       }
 
       updateBullets(dt);
@@ -426,8 +379,8 @@
 
       enemySpawnCooldown -= dt;
       if (enemySpawnCooldown < 0) {
-        enemySpawnCooldown = 5 + Math.random() * 3;
-        if (enemies.length < 4) spawnEnemy();
+        enemySpawnCooldown = 6 + Math.random() * 3;
+        if (enemies.length < 3) spawnEnemy();
       }
     }
 
@@ -439,11 +392,9 @@
         b.life += dt;
 
         if (
-          b.x < -20 ||
-          b.x > canvas.width + 20 ||
-          b.y < -20 ||
-          b.y > canvas.height + 20 ||
-          b.life > 4.0
+          b.x < -20 || b.x > canvas.width + 20 ||
+          b.y < -20 || b.y > canvas.height + 20 ||
+          b.life > 4
         ) {
           bullets.splice(i, 1);
           continue;
@@ -452,51 +403,50 @@
         if (b.fromEnemy && player.alive) {
           if (distance(b.x, b.y, player.x, player.y) < player.radius) {
             bullets.splice(i, 1);
-            player.lives -= 1;
-            if (player.lives <= 0) {
-              player.alive = false;
-            }
+            hitPlayer();
             continue;
           }
         } else if (!b.fromEnemy) {
-          // hit stationary targets
+          // player bullet hits target
+          let hitSomething = false;
           for (let j = targets.length - 1; j >= 0; j--) {
             const t = targets[j];
             if (distance(b.x, b.y, t.x, t.y) < t.radius) {
-              bullets.splice(i, 1);
               targets.splice(j, 1);
               score += 1;
+              hitSomething = true;
               break;
             }
           }
-          // hit enemies
+          if (hitSomething) { bullets.splice(i, 1); continue; }
+
+          // player bullet hits enemy
           for (let k = enemies.length - 1; k >= 0; k--) {
             const e = enemies[k];
             if (distance(b.x, b.y, e.x, e.y) < e.radius) {
-              bullets.splice(i, 1);
               enemies.splice(k, 1);
               score += 2;
+              hitSomething = true;
               break;
             }
           }
+          if (hitSomething) { bullets.splice(i, 1); continue; }
         }
       }
     }
 
     function updateEnemies(dt) {
-      const speed = 40; // slow for e-ink
+      const speed = 25; // even slower for Scribe
       for (const e of enemies) {
-        // simple AI: face most direct 90° toward player occasionally
+        // change facing toward player only every 0.3s
         e.moveTimer += dt;
-        if (e.moveTimer > 0.2) { // update direction only 5x/s
+        if (e.moveTimer > 0.3) {
           e.moveTimer = 0;
           const dx = player.x - e.x;
           const dy = player.y - e.y;
           if (Math.abs(dx) > Math.abs(dy)) {
-            // horizontal
             e.dirIndex = dx > 0 ? 0 : 2;
           } else {
-            // vertical
             e.dirIndex = dy > 0 ? 1 : 3;
           }
         }
@@ -505,25 +455,28 @@
         e.x += dir.vx * speed * dt;
         e.y += dir.vy * speed * dt;
 
-        // bounds bounce
+        // bounds
         const margin = e.radius + 2;
         if (e.x < margin) { e.x = margin; e.dirIndex = 0; }
         if (e.x > canvas.width - margin) { e.x = canvas.width - margin; e.dirIndex = 2; }
         if (e.y < margin) { e.y = margin; e.dirIndex = 1; }
         if (e.y > canvas.height - margin) { e.y = canvas.height - margin; e.dirIndex = 3; }
 
+        // collision with player body
+        if (player.alive && distance(e.x, e.y, player.x, player.y) < e.radius + player.radius - 3) {
+          hitPlayer();
+        }
+
         // shooting when roughly aligned
-        e.shootCooldown -= dt;
-        if (e.shootCooldown < 0) e.shootCooldown = 0;
+        e.shootCooldown -= dt; if (e.shootCooldown < 0) e.shootCooldown = 0;
         if (e.shootCooldown === 0 && player.alive) {
           const dx = player.x - e.x;
           const dy = player.y - e.y;
           const alignedHoriz = Math.abs(dy) < 18 && Math.sign(dx) === DIRS[e.dirIndex].vx;
-          const alignedVert = Math.abs(dx) < 18 && Math.sign(dy) === DIRS[e.dirIndex].vy;
-
-          if ((alignedHoriz || alignedVert) && distance(e.x, e.y, player.x, player.y) < 400) {
-            fireBullet(e, 120, true);
-            e.shootCooldown = 2.0 + Math.random(); // slow shots
+          const alignedVert  = Math.abs(dx) < 18 && Math.sign(dy) === DIRS[e.dirIndex].vy;
+          if ((alignedHoriz || alignedVert) && distance(e.x, e.y, player.x, player.y) < 350) {
+            fireBullet(e, 80, true);
+            e.shootCooldown = 2.3 + Math.random();
           }
         }
       }
@@ -565,11 +518,7 @@
     }
 
     function drawPlayer() {
-      if (!player.alive) {
-        drawTank(player.x, player.y, player.dirIndex, "#4a7c59", "#385d42");
-      } else {
-        drawTank(player.x, player.y, player.dirIndex, "#4a7c59", "#385d42");
-      }
+      drawTank(player.x, player.y, player.dirIndex, "#4a7c59", "#385d42");
     }
 
     function drawEnemies() {
@@ -614,7 +563,7 @@
       ctx.fillText("Lives: " + player.lives, 10, 26);
 
       if (!player.alive) {
-        const msg = "You were hit! Press R or tap FIRE to restart.";
+        const msg = "You were hit! Press R or FIRE to restart.";
         ctx.font = "16px system-ui, sans-serif";
         const w = ctx.measureText(msg).width;
         ctx.fillText(msg, (canvas.width - w) / 2, canvas.height / 2 - 10);
@@ -631,12 +580,23 @@
       drawHUD();
     }
 
+    // ======== Game loop (6 fps-ish) ========
+    let lastTime = 0;
+    let accumulator = 0;
+    const STEP = 1 / 6; // ~6 updates per second
+
     function gameLoop(timestamp) {
       if (!lastTime) lastTime = timestamp;
-      const dt = (timestamp - lastTime) / 1000;
+      let dt = (timestamp - lastTime) / 1000;
+      if (dt > 0.25) dt = 0.25;   // clamp huge pauses
       lastTime = timestamp;
+      accumulator += dt;
 
-      update(dt);
+      while (accumulator >= STEP) {
+        update(STEP);
+        accumulator -= STEP;
+      }
+
       render();
       window.requestAnimationFrame(gameLoop);
     }
