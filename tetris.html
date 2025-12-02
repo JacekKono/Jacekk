@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Kindle Tetris</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <style>
+    * {
+      box-sizing: border-box;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #e9e5d8;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #111;
+    }
+
+    #gameContainer {
+      display: flex;
+      flex-direction: column;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    #gameArea {
+      position: relative;
+      flex: 1 1 auto;
+      width: 100%;
+      overflow: hidden;
+      background: #f4f2ea;
+      border-bottom: 1px solid #c0b9aa;
+    }
+
+    #gameCanvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    #infoBar {
+      position: absolute;
+      top: 0.4rem;
+      left: 0.4rem;
+      right: 0.4rem;
+      background: rgba(255, 255, 255, 0.95);
+      padding: 0.4rem 0.6rem;
+      border-radius: 0.3rem;
+      font-size: 0.8rem;
+      border: 1px solid #c8c2b5;
+      pointer-events: none;
+    }
+
+    #infoTitle {
+      font-weight: 600;
+      margin-bottom: 0.15rem;
+    }
+
+    #hudStats {
+      font-weight: 600;
+      margin-bottom: 0.15rem;
+    }
+
+    #infoHelp {
+      font-size: 0.75rem;
+    }
+
+    #touchControlsBar {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.7rem 0.5rem;
+    }
+
+    #touchControls {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.6rem;
+      width: 100%;
+      max-width: 500px;
+      margin: 0 auto;
+    }
+
+    .ctrl-row {
+      display: flex;
+      justify-content: center;
+      gap: 0.8rem;
+      width: 100%;
+    }
+
+    .ctrl-btn {
+      flex: 1 1 auto;
+      min-width: 4.3rem;
+      min-height: 4.3rem;
+      border-radius: 1.2rem;
+      border: 1px solid #857d6a;
+      background: #fdfbf6;
+      color: #111;
+      font-size: 1.3rem;
+      font-weight: 600;
+      padding: 0.4rem 0.6rem;
+      cursor: pointer;
+      touch-action: none;
+    }
+
+    .ctrl-btn.wide {
+      min-width: 6rem;
+      font-size: 1.1rem;
+    }
+
+    .ctrl-btn:active {
+      background: #e4decf;
+    }
+
+    @media (min-width: 900px) {
+      .ctrl-btn {
+        min-width: 4rem;
+        min-height: 4rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="gameContainer">
+    <div id="gameArea">
+      <canvas id="gameCanvas"></canvas>
+      <div id="infoBar">
+        <div id="infoTitle">Kindle Tetris</div>
+        <div id="hudStats">Score: 0 · Lines: 0 · Level: 1 · Time: 00:00</div>
+        <div id="infoHelp">
+          ◀ / ▶ move • ▲ rotate • ▼ down • Space drop • N / NEW = new game
+        </div>
+      </div>
+    </div>
+
+    <div id="touchControlsBar">
+      <div id="touchControls">
+        <div class="ctrl-row">
+          <button id="btnLeft" class="ctrl-btn">◀</button>
+          <button id="btnRight" class="ctrl-btn">▶</button>
+          <button id="btnRotate" class="ctrl-btn">⟳</button>
+        </div>
+        <div class="ctrl-row">
+          <button id="btnDown" class="ctrl-btn wide">DOWN</button>
+          <button id="btnDrop" class="ctrl-btn wide">DROP</button>
+          <button id="btnNew" class="ctrl-btn wide">NEW</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ===== Basic setup =====
+    var canvas = document.getElementById("gameCanvas");
+    var ctx = canvas.getContext("2d");
+    var hudStats = document.getElementById("hudStats");
+
+    var COLS = 10;
+    var ROWS = 20;
+    var board = [];
+    var cellSize = 20;
+
+    var currentShape = null;
+    var currentX = 0;
+    var currentY = 0;
+
+    var dropInterval = 800;    // ms between automatic drops (will decrease with level)
+    var dropTimer = 0;
+
+    var lastTime = 0;
+    var gameOver = false;
+
+    var score = 0;
+    var linesCleared = 0;
+    var level = 1;
+    var elapsedMs = 0;         // total elapsed time
+
+    // Tetrominoes (shapes as matrices of 0/1)
+    var SHAPES = [
+      [[1,1,1,1]],                  // I
+      [[1,0,0],[1,1,1]],            // J
+      [[0,0,1],[1,1,1]],            // L
+      [[1,1],[1,1]],                // O
+      [[0,1,1],[1,1,0]],            // S
+      [[0,1,0],[1,1,1]],            // T
+      [[1,1,0],[0,1,1]]             // Z
+    ];
+
+    function createBoard() {
+      board = [];
+      for (var r = 0; r < ROWS; r++) {
+        var row = [];
+        for (var c = 0; c < COLS; c++) row.push(0);
+        board.push(row);
+      }
+    }
+
+    function resizeCanvas() {
+      var rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+
+      var cw = canvas.width / COLS;
+      var ch = canvas.height / ROWS;
+      cellSize = Math.floor(Math.min(cw, ch));
+
+      render();
+    }
+
+    window.addEventListener("resize", resizeCanvas);
+
+    // ===== Input handling =====
+    function moveLeft() {
+      if (gameOver) return;
+      if (!collides(currentX - 1, currentY, currentShape)) currentX--;
+    }
+
+    function moveRight() {
+      if (gameOver) return;
+      if (!collides(currentX + 1, currentY, currentShape)) currentX++;
+    }
+
+    function moveDown() {
+      if (gameOver) return;
+      if (!collides(currentX, currentY + 1, currentShape)) {
+        currentY++;
+      } else {
+        lockPiece();
+        spawnPiece();
+      }
+    }
+
+    function hardDrop() {
+      if (gameOver) return;
+      while (!collides(currentX, currentY + 1, currentShape)) currentY++;
+      lockPiece();
+      spawnPiece();
+    }
+
+    function rotatePiece() {
+      if (gameOver) return;
+      var rotated = rotateMatrix(currentShape);
+      if (!collides(currentX, currentY, rotated)) currentShape = rotated;
+    }
+
+    document.addEventListener("keydown", function(e) {
+      var handled = false;
+      switch (e.key) {
+        case "ArrowLeft": case "a": case "A":
+          moveLeft(); handled = true; break;
+        case "ArrowRight": case "d": case "D":
+          moveRight(); handled = true; break;
+        case "ArrowUp": case "w": case "W":
+          rotatePiece(); handled = true; break;
+        case "ArrowDown": case "s": case "S":
+          moveDown(); handled = true; break;
+        case " ":
+          hardDrop(); handled = true; break;
+        case "n": case "N":
+          newGame(); handled = true; break;
+      }
+      if (handled) e.preventDefault();
+    });
+
+    function bindButton(id, action) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      var down = function(ev) { ev.preventDefault(); action(); };
+      btn.addEventListener("touchstart", down, { passive:false });
+      btn.addEventListener("mousedown", down);
+    }
+
+    bindButton("btnLeft", moveLeft);
+    bindButton("btnRight", moveRight);
+    bindButton("btnDown", moveDown);
+    bindButton("btnRotate", rotatePiece);
+    bindButton("btnDrop", hardDrop);
+    bindButton("btnNew", newGame);
+
+    // ===== Core Tetris logic =====
+    function rotateMatrix(matrix) {
+      var rows = matrix.length;
+      var cols = matrix[0].length;
+      var result = [];
+      for (var c = 0; c < cols; c++) {
+        result[c] = [];
+        for (var r = rows - 1; r >= 0; r--) {
+          result[c].push(matrix[r][c]);
+        }
+      }
+      return result;
+    }
+
+    function collides(nx, ny, shape) {
+      var rows = shape.length;
+      var cols = shape[0].length;
+      for (var r = 0; r < rows; r++) {
+        for (var c = 0; c < cols; c++) {
+          if (!shape[r][c]) continue;
+          var x = nx + c;
+          var y = ny + r;
+          if (x < 0 || x >= COLS || y >= ROWS) return true;
+          if (y >= 0 && board[y][x]) return true;
+        }
+      }
+      return false;
+    }
+
+    function lockPiece() {
+      var rows = currentShape.length;
+      var cols = currentShape[0].length;
+      for (var r = 0; r < rows; r++) {
+        for (var c = 0; c < cols; c++) {
+          if (currentShape[r][c]) {
+            var x = currentX + c;
+            var y = currentY + r;
+            if (y >= 0 && y < ROWS && x >= 0 && x < COLS) {
+              board[y][x] = 1;
+            } else {
+              gameOver = true;
+            }
+          }
+        }
+      }
+      clearLines();
+    }
+
+    function clearLines() {
+      var lines = 0;
+      for (var r = ROWS - 1; r >= 0; r--) {
+        var full = true;
+        for (var c = 0; c < COLS; c++) {
+          if (!board[r][c]) { full = false; break; }
+        }
+        if (full) {
+          board.splice(r, 1);
+          var newRow = [];
+          for (var cc = 0; cc < COLS; cc++) newRow.push(0);
+          board.unshift(newRow);
+          lines++;
+          r++;
+        }
+      }
+      if (lines > 0) {
+        // Basic scoring similar to classic Tetris: 1/2/3/4 lines -> 100/300/500/800 base
+        var lineScore = [0,100,300,500,800];
+        score += lineScore[Math.min(lines,4)] * level;
+
+        linesCleared += lines;
+        // level up every 10 lines
+        var newLevel = 1 + Math.floor(linesCleared / 10);
+        if (newLevel !== level) {
+          level = newLevel;
+          // make speed increase more noticeable: bigger step per level
+          dropInterval = Math.max(150, 900 - (level - 1) * 120);
+        }
+      }
+    }
+
+    function randomShape() {
+      var idx = Math.floor(Math.random() * SHAPES.length);
+      var shape = SHAPES[idx];
+      var rows = shape.length;
+      var cols = shape[0].length;
+      var copy = [];
+      for (var r = 0; r < rows; r++) {
+        copy[r] = [];
+        for (var c = 0; c < cols; c++) copy[r][c] = shape[r][c];
+      }
+      return copy;
+    }
+
+    function spawnPiece() {
+      currentShape = randomShape();
+      currentY = -2;
+      currentX = Math.floor((COLS - currentShape[0].length) / 2);
+      if (collides(currentX, currentY, currentShape)) {
+        gameOver = true;
+      }
+    }
+
+    function newGame() {
+      createBoard();
+      score = 0;
+      linesCleared = 0;
+      level = 1;
+      dropInterval = 800;
+      elapsedMs = 0;
+      dropTimer = 0;
+      gameOver = false;
+      spawnPiece();
+    }
+
+    // ===== Rendering =====
+    function clearCanvas() {
+      ctx.fillStyle = "#f4f2ea";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function drawGrid(offsetX, offsetY) {
+      ctx.strokeStyle = "#d5cfbf";
+      ctx.lineWidth = 1;
+      for (var c = 0; c <= COLS; c++) {
+        var x = offsetX + c * cellSize + 0.5;
+        ctx.beginPath();
+        ctx.moveTo(x, offsetY);
+        ctx.lineTo(x, offsetY + ROWS * cellSize);
+        ctx.stroke();
+      }
+      for (var r = 0; r <= ROWS; r++) {
+        var y = offsetY + r * cellSize + 0.5;
+        ctx.beginPath();
+        ctx.moveTo(offsetX, y);
+        ctx.lineTo(offsetX + COLS * cellSize, y);
+        ctx.stroke();
+      }
+    }
+
+    function drawBoard(offsetX, offsetY) {
+      for (var r = 0; r < ROWS; r++) {
+        for (var c = 0; c < COLS; c++) {
+          if (board[r][c]) drawCell(offsetX, offsetY, c, r, "#555");
+        }
+      }
+    }
+
+    function drawCell(offsetX, offsetY, col, row, color) {
+      var x = offsetX + col * cellSize;
+      var y = offsetY + row * cellSize;
+      ctx.fillStyle = color;
+      ctx.fillRect(x + 1, y + 1, cellSize - 2, cellSize - 2);
+    }
+
+    function drawCurrent(offsetX, offsetY) {
+      if (!currentShape) return;
+      var rows = currentShape.length;
+      var cols = currentShape[0].length;
+      for (var r = 0; r < rows; r++) {
+        for (var c = 0; c < cols; c++) {
+          if (currentShape[r][c]) {
+            var x = currentX + c;
+            var y = currentY + r;
+            if (y >= 0) drawCell(offsetX, offsetY, x, y, "#222");
+          }
+        }
+      }
+    }
+
+    function updateHUD() {
+      if (!hudStats) return;
+      var seconds = Math.floor(elapsedMs / 1000);
+      var mm = String(Math.floor(seconds / 60)).padStart(2,"0");
+      var ss = String(seconds % 60).padStart(2,"0");
+      var timeStr = mm + ":" + ss;
+      hudStats.textContent =
+        "Score: " + score +
+        " · Lines: " + linesCleared +
+        " · Level: " + level +
+        " · Time: " + timeStr;
+    }
+
+    function render() {
+      clearCanvas();
+      var boardWidth = COLS * cellSize;
+      var boardHeight = ROWS * cellSize;
+      var offsetX = Math.floor((canvas.width - boardWidth) / 2);
+      var offsetY = Math.floor((canvas.height - boardHeight) / 2);
+
+      drawGrid(offsetX, offsetY);
+      drawBoard(offsetX, offsetY);
+      drawCurrent(offsetX, offsetY);
+      updateHUD();
+    }
+
+    // ===== Game loop =====
+    function update(dtMs) {
+      if (!gameOver) {
+        elapsedMs += dtMs;
+        dropTimer += dtMs;
+        if (dropTimer >= dropInterval) {
+          dropTimer = 0;
+          moveDown();
+        }
+      }
+    }
+
+    function gameLoop(timestamp) {
+      if (!lastTime) lastTime = timestamp;
+      var dtMs = timestamp - lastTime;
+      lastTime = timestamp;
+
+      update(dtMs);
+      render();
+      requestAnimationFrame(gameLoop);
+    }
+
+    // ===== Init =====
+    createBoard();
+    resizeCanvas();
+    newGame();
+    requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>
