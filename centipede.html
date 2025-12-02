@@ -95,6 +95,12 @@
       background: #e4decf;
     }
 
+    .ctrl-btn.disabled {
+      opacity: 0.4;
+      border-style: dashed;
+      cursor: default;
+    }
+
     @media (min-width: 900px) {
       .ctrl-btn {
         min-width: 4rem;
@@ -116,12 +122,12 @@
         </div>
         <div class="ctrl-row">
           <button id="btnLeft" class="ctrl-btn">◀</button>
-          <button id="btnWait" class="ctrl-btn wide">WAIT</button>
+          <button id="btnDown" class="ctrl-btn">▼</button>
           <button id="btnRight" class="ctrl-btn">▶</button>
         </div>
         <div class="ctrl-row">
           <button id="btnAction" class="ctrl-btn wide">ACTION</button>
-          <button id="btnDown" class="ctrl-btn">▼</button>
+          <button id="btnSound" class="ctrl-btn wide">SOUND</button>
           <button id="btnNew" class="ctrl-btn wide">NEW</button>
         </div>
       </div>
@@ -152,7 +158,6 @@
       const boardHeight = cellSize * GRID_ROWS;
       gridOffsetX = Math.floor((canvas.width - boardWidth) / 2);
       gridOffsetY = Math.floor((canvas.height - boardHeight) / 2);
-      // Don't call render() here; level setup may not be ready yet.
     }
 
     window.addEventListener("resize", resizeCanvas);
@@ -164,21 +169,9 @@
       };
     }
 
-    // ===== Level definitions =====
-    // Legend:
-    // # = wall
-    // . = floor
-    // P = player start
-    // G = patrolling guard (horizontal)
-    // S = stationary guard
-    // R = rotating scanner
-    // B = barrel (explosive)
-    // C = crate (pushable, blocks vision)
-    // D = blast door (explosion only)
-    // K = intel crate (must collect all)
-    // X = extraction point
-    const LEVELS = [
-      [ // Level 1 – simple intro
+    // ===== Campaign levels (hand-made) =====
+    const CAMPAIGN_LEVELS = [
+      [ // Mission 1
         "###############",
         "#P..#....K...X#",
         "#..##.###.##..#",
@@ -195,7 +188,7 @@
         "#.............#",
         "###############"
       ],
-      [ // Level 2 – original map w/ intel
+      [ // Mission 2
         "###############",
         "#P..#.....G..K#",
         "#..##.###.##..#",
@@ -212,7 +205,7 @@
         "#......S......#",
         "###############"
       ],
-      [ // Level 3 – more intel & guards
+      [ // Mission 3
         "###############",
         "#P..#..K....X.#",
         "#..##.###.##..#",
@@ -231,12 +224,105 @@
       ]
     ];
 
+    // ===== Random base templates (walls, player, exit only) =====
+    const RANDOM_TEMPLATES = [
+      [
+        "###############",
+        "#P....#.......#",
+        "#.....#..X....#",
+        "#.....#####...#",
+        "#.............#",
+        "#..###..###...#",
+        "#..#.......#..#",
+        "#..#.......#..#",
+        "#..###..###...#",
+        "#.............#",
+        "#...#####.....#",
+        "#.............#",
+        "#.....#.......#",
+        "#.....#.......#",
+        "###############"
+      ],
+      [
+        "###############",
+        "#P..#.....X...#",
+        "#...#.........#",
+        "#...#..#####..#",
+        "#...#.........#",
+        "#...#####.....#",
+        "#.............#",
+        "#..###...###..#",
+        "#..#.......#..#",
+        "#..#.......#..#",
+        "#..###...###..#",
+        "#.............#",
+        "#.....#####...#",
+        "#.............#",
+        "###############"
+      ],
+      [
+        "###############",
+        "#P..#.........#",
+        "#...#..###....#",
+        "#...#..#X#....#",
+        "#...#..###....#",
+        "#.............#",
+        "#..####...###.#",
+        "#.............#",
+        "#.###...####..#",
+        "#.............#",
+        "#....###...###.",
+        "#.............#",
+        "#....#........#",
+        "#....#........#",
+        "###############"
+      ]
+    ];
+
+    function randInt(min, max) {
+      return min + Math.floor(Math.random() * (max - min + 1));
+    }
+
+    function generateRandomLayout() {
+      const base = RANDOM_TEMPLATES[randInt(0, RANDOM_TEMPLATES.length - 1)];
+      const grid = base.map(row => row.split(""));
+
+      const floors = [];
+      for (let r = 0; r < GRID_ROWS; r++) {
+        for (let c = 0; c < GRID_COLS; c++) {
+          const ch = grid[r][c];
+          if (ch === ".") {
+            floors.push({ col: c, row: r });
+          }
+        }
+      }
+
+      function placeChar(ch, count) {
+        for (let i = 0; i < count && floors.length > 0; i++) {
+          const idx = Math.floor(Math.random() * floors.length);
+          const spot = floors.splice(idx, 1)[0];
+          grid[spot.row][spot.col] = ch;
+        }
+      }
+
+      placeChar("K", randInt(2, 4)); // intel
+      placeChar("B", randInt(2, 5)); // barrels
+      placeChar("C", randInt(2, 5)); // crates
+      placeChar("G", randInt(1, 3)); // patrol guards
+      placeChar("S", randInt(0, 2)); // stationary guards
+      placeChar("R", randInt(1, 3)); // cameras
+
+      return grid.map(row => row.join(""));
+    }
+
     const TILE_WALL  = "#";
     const TILE_FLOOR = ".";
     const TILE_DOOR  = "D";
     const TILE_EXIT  = "X";
 
-    let currentLevelIndex = 0;
+    // Mission index (0.. campaign, then infinite random)
+    let currentMission = 0;
+    let currentLayout = null; // array of strings for this mission
 
     // ===== Game state =====
     let baseMap = [];
@@ -248,7 +334,7 @@
       won: false
     };
 
-    let guards = [];
+    let guards = [];     // includes cameras as type "camera"
     let barrels = [];
     let crates = [];
     let explosions = [];
@@ -266,9 +352,20 @@
       action: false
     };
 
+    // ===== Layout selection =====
+    function buildMissionLayout(index) {
+      if (index < CAMPAIGN_LEVELS.length) {
+        return CAMPAIGN_LEVELS[index];
+      }
+      return generateRandomLayout();
+    }
+
     // ===== Level loading =====
-    function resetLevel() {
-      const level = LEVELS[currentLevelIndex];
+    function resetLevel(isNewMission = false) {
+      if (isNewMission || !currentLayout) {
+        currentLayout = buildMissionLayout(currentMission);
+      }
+      const level = currentLayout;
 
       baseMap = [];
       guards = [];
@@ -297,11 +394,31 @@
             player.row = r;
             player.dir = { x: 0, y: -1 };
           } else if (ch === "G") {
-            guards.push({ col: c, row: r, type: "patrol", dirX: 1, dirY: 0 });
+            guards.push({
+              col: c,
+              row: r,
+              type: "patrol",
+              dirX: 1,
+              dirY: 0,
+              mode: "normal",
+              soundTarget: null
+            });
           } else if (ch === "S") {
-            guards.push({ col: c, row: r, type: "stationary", facing: { x: 0, y: -1 } });
+            guards.push({
+              col: c,
+              row: r,
+              type: "stationary",
+              facing: { x: 0, y: -1 },
+              mode: "normal",
+              soundTarget: null
+            });
           } else if (ch === "R") {
-            guards.push({ col: c, row: r, type: "scanner", facingIndex: 0 });
+            guards.push({
+              col: c,
+              row: r,
+              type: "camera",
+              facingIndex: 0
+            });
           } else if (ch === "B") {
             barrels.push({ col: c, row: r });
           } else if (ch === "C") {
@@ -314,12 +431,18 @@
         }
       }
 
-      showMessage("Mission " + (currentLevelIndex + 1), 2);
+      const inCampaign = currentMission < CAMPAIGN_LEVELS.length;
+      const missionLabel = inCampaign
+        ? "Mission " + (currentMission + 1)
+        : "Random op " + (currentMission - CAMPAIGN_LEVELS.length + 1);
+      showMessage(missionLabel, 2);
+      updateButtons();
     }
 
     function nextLevel() {
-      currentLevelIndex = (currentLevelIndex + 1) % LEVELS.length;
-      resetLevel();
+      currentMission++;
+      currentLayout = null;
+      resetLevel(true);
     }
 
     // ===== Helpers =====
@@ -379,7 +502,8 @@
       if (t === TILE_WALL || t === TILE_DOOR) return true;
       if (findCrate(col, row)) return true;
       if (findBarrel(col, row)) return true;
-      if (guardAt(col, row)) return true;
+      const g = guardAt(col, row);
+      if (g && g.type !== "camera") return true;
       return false;
     }
 
@@ -388,7 +512,8 @@
       if (t === TILE_WALL || t === TILE_DOOR) return true;
       if (findCrate(col, row)) return true;
       if (findBarrel(col, row)) return true;
-      if (guardAt(col, row)) return true;
+      const g = guardAt(col, row);
+      if (g && g.type !== "camera") return true;
       return false;
     }
 
@@ -413,6 +538,57 @@
       }
     }
 
+    function canUseActionHere() {
+      const dirs = [
+        { x: 1, y: 0 }, { x: -1, y: 0 },
+        { x: 0, y: 1 }, { x: 0, y: -1 }
+      ];
+      for (let i = 0; i < dirs.length; i++) {
+        const nx = player.col + dirs[i].x;
+        const ny = player.row + dirs[i].y;
+        if (findBarrel(nx, ny)) return true;
+      }
+      return false;
+    }
+
+    function updateButtons() {
+      const actionBtn = document.getElementById("btnAction");
+      const soundBtn  = document.getElementById("btnSound");
+
+      if (actionBtn) {
+        const usable = canUseActionHere() && player.alive && !player.won;
+        actionBtn.disabled = !usable;
+        if (usable) actionBtn.classList.remove("disabled");
+        else actionBtn.classList.add("disabled");
+      }
+
+      if (soundBtn) {
+        const usable = guards.some(g => g.type !== "camera") && player.alive && !player.won;
+        soundBtn.disabled = !usable;
+        if (usable) soundBtn.classList.remove("disabled");
+        else soundBtn.classList.add("disabled");
+      }
+    }
+
+    // ===== Guard luring helper (used by SOUND and explosions) =====
+    function lureNearestGuardTo(tx, ty) {
+      let bestGuard = null;
+      let bestDist = Infinity;
+      for (let i = 0; i < guards.length; i++) {
+        const g = guards[i];
+        if (g.type === "camera") continue;
+        const d = Math.abs(g.col - tx) + Math.abs(g.row - ty);
+        if (d < bestDist) {
+          bestDist = d;
+          bestGuard = g;
+        }
+      }
+      if (!bestGuard) return false;
+      bestGuard.mode = "sound";
+      bestGuard.soundTarget = { col: tx, row: ty };
+      return true;
+    }
+
     // ===== Turn system =====
     function performTurn(action) {
       if (!player.alive || player.won) return;
@@ -434,26 +610,37 @@
 
       keys.up = keys.down = keys.left = keys.right = false;
       keys.wait = keys.action = false;
-      if (!moved) return;
+      if (!moved) {
+        updateButtons();
+        return;
+      }
 
       pickupIntelIfAny();
-
       stepGuards();
       checkDetection();
 
-      if (!player.alive) return;
+      if (!player.alive) {
+        updateButtons();
+        return;
+      }
       if (tileAt(player.col, player.row) === TILE_EXIT) {
         if (allIntelCollected()) {
           player.won = true;
-          if (currentLevelIndex === LEVELS.length - 1) {
-            showMessage("All missions complete!", 4);
-          } else {
+          const inCampaign = currentMission < CAMPAIGN_LEVELS.length;
+          const lastCampaign = currentMission === CAMPAIGN_LEVELS.length - 1;
+          if (inCampaign && !lastCampaign) {
             showMessage("Mission complete! NEW → next.", 4);
+          } else if (lastCampaign) {
+            showMessage("Campaign complete! NEW → random ops.", 4);
+          } else {
+            showMessage("Op complete! NEW → new layout.", 4);
           }
         } else {
           showMessage("Collect all intel first!", 2.5);
         }
       }
+
+      updateButtons();
     }
 
     function tryMovePlayer(dx, dy) {
@@ -483,6 +670,7 @@
     }
 
     function doPlayerAction() {
+      if (!player.alive || player.won) return;
       let detonated = false;
       const dirs = [
         { x: 1, y: 0 }, { x: -1, y: 0 },
@@ -500,6 +688,14 @@
       if (!detonated) showMessage("No barrel next to you.", 1.5);
     }
 
+    // ===== Sound lure =====
+    function makeSound() {
+      if (!player.alive || player.won) return;
+      const ok = lureNearestGuardTo(player.col, player.row);
+      if (ok) showMessage("Clink! Someone's coming...", 1.5);
+      updateButtons();
+    }
+
     function createExplosionAt(col, row) {
       const p = gridToCenter(col, row);
       explosions.push({ x: p.x, y: p.y, age: 0, duration: 0.5, col, row });
@@ -508,7 +704,7 @@
         for (let rx = col - 1; rx <= col + 1; rx++) {
           if (!inBounds(rx, ry)) continue;
           const b = findBarrel(rx, ry); if (b) removeBarrel(b);
-          const c = findCrate(rx, ry); if (c) removeCrate(c);
+          const c = findCrate(rx, ry);  if (c) removeCrate(c);
           clearDoorAt(rx, ry);
           const g = guardAt(rx, ry);
           if (g) {
@@ -517,6 +713,10 @@
           }
         }
       }
+
+      // After the blast, lure the nearest remaining (non-camera) guard
+      const lured = lureNearestGuardTo(col, row);
+      if (lured) showMessage("Boom! A guard investigates.", 1.5);
     }
 
     function updateExplosions(dt) {
@@ -537,6 +737,45 @@
     function stepGuards() {
       for (let i = 0; i < guards.length; i++) {
         const g = guards[i];
+
+        if (g.type === "camera") {
+          // rotate through 8 directions
+          g.facingIndex = (g.facingIndex + 1) % 8;
+          continue;
+        }
+
+        // Sound-driven movement overrides normal behaviour
+        if (g.mode === "sound" && g.soundTarget) {
+          const tx = g.soundTarget.col;
+          const ty = g.soundTarget.row;
+
+          if (g.col === tx && g.row === ty) {
+            g.mode = "normal";
+            g.soundTarget = null;
+            continue;
+          }
+
+          let dx = Math.sign(tx - g.col);
+          let dy = Math.sign(ty - g.row);
+          let moved = false;
+
+          if (dx !== 0 && !isBlockedForGuard(g.col + dx, g.row)) {
+            g.col += dx;
+            if (g.type === "patrol") g.dirX = dx;
+            moved = true;
+          } else if (dy !== 0 && !isBlockedForGuard(g.col, g.row + dy)) {
+            g.row += dy;
+            moved = true;
+          }
+
+          if (!moved) {
+            g.mode = "normal";
+            g.soundTarget = null;
+          }
+          continue;
+        }
+
+        // Normal patterns
         if (g.type === "patrol") {
           let nextCol = g.col + g.dirX;
           if (!inBounds(nextCol, g.row) || isWallLike(nextCol, g.row) || isBlockedForGuard(nextCol, g.row)) {
@@ -544,14 +783,14 @@
             nextCol = g.col + g.dirX;
           }
           if (!isBlockedForGuard(nextCol, g.row)) g.col = nextCol;
-        } else if (g.type === "scanner") {
-          g.facingIndex = (g.facingIndex + 1) % 4;
+        } else if (g.type === "stationary") {
+          // stationary guard just looks in one direction for now
         }
       }
 
       for (let i = 0; i < guards.length; i++) {
         const g = guards[i];
-        if (g.col === player.col && g.row === player.row) {
+        if (g.type !== "camera" && g.col === player.col && g.row === player.row) {
           player.alive = false;
           showMessage("You were caught!", 4);
           return;
@@ -559,7 +798,7 @@
       }
     }
 
-    // ===== Detection & fields of view =====
+    // ===== Detection & FOV =====
     function rayDetectsPlayer(startCol, startRow, dx, dy, maxDist) {
       let col = startCol, row = startRow;
       for (let step = 0; step < maxDist; step++) {
@@ -567,7 +806,6 @@
         if (!inBounds(col, row)) return false;
         const t = tileAt(col, row);
         if (t === TILE_WALL || t === TILE_DOOR) return false;
-        // crates and barrels also block vision now
         if (findCrate(col, row) || findBarrel(col, row)) return false;
         if (col === player.col && row === player.row) return true;
       }
@@ -576,8 +814,21 @@
 
     function checkDetection() {
       if (!player.alive) return;
+
+      const cameraDirs = [
+        { x: 0,  y: -1 },
+        { x: 1,  y: -1 },
+        { x: 1,  y: 0  },
+        { x: 1,  y: 1  },
+        { x: 0,  y: 1  },
+        { x: -1, y: 1  },
+        { x: -1, y: 0  },
+        { x: -1, y: -1 }
+      ];
+
       for (let i = 0; i < guards.length; i++) {
         const g = guards[i];
+
         if (g.type === "patrol") {
           if (rayDetectsPlayer(g.col, g.row, g.dirX, 0, 4)) {
             player.alive = false;
@@ -591,26 +842,32 @@
             showMessage("Guard spotted you!", 4);
             return;
           }
-        } else if (g.type === "scanner") {
-          const dirs = [
-            { x: 0, y: -1 }, { x: 1, y: 0 },
-            { x: 0, y: 1 },  { x: -1, y: 0 }
-          ];
-          const d = dirs[g.facingIndex];
+        } else if (g.type === "camera") {
+          const d = cameraDirs[g.facingIndex];
           if (rayDetectsPlayer(g.col, g.row, d.x, d.y, 6)) {
             player.alive = false;
-            showMessage("Scanner alarm!", 4);
+            showMessage("Camera alarm!", 4);
             return;
           }
         }
       }
     }
 
-    // For drawing FOV strips
     function drawGuardFOV() {
       ctx.save();
       ctx.globalAlpha = 0.18;
       ctx.fillStyle = "#777";
+
+      const cameraDirs = [
+        { x: 0,  y: -1 },
+        { x: 1,  y: -1 },
+        { x: 1,  y: 0  },
+        { x: 1,  y: 1  },
+        { x: 0,  y: 1  },
+        { x: -1, y: 1  },
+        { x: -1, y: 0  },
+        { x: -1, y: -1 }
+      ];
 
       for (let i = 0; i < guards.length; i++) {
         const g = guards[i];
@@ -620,12 +877,8 @@
           dx = g.dirX; dy = 0; maxDist = 4;
         } else if (g.type === "stationary") {
           dx = g.facing.x; dy = g.facing.y; maxDist = 5;
-        } else if (g.type === "scanner") {
-          const dirs = [
-            { x: 0, y: -1 }, { x: 1, y: 0 },
-            { x: 0, y: 1 },  { x: -1, y: 0 }
-          ];
-          const d = dirs[g.facingIndex];
+        } else if (g.type === "camera") {
+          const d = cameraDirs[g.facingIndex];
           dx = d.x; dy = d.y; maxDist = 6;
         } else {
           continue;
@@ -665,10 +918,16 @@
         keys.action = true; handled = true; performTurn("action");
       } else if (e.key === "Enter") {
         keys.wait = true; handled = true; performTurn("wait");
+      } else if (e.key === "m" || e.key === "M") {
+        handled = true;
+        makeSound();
+        stepGuards();
+        checkDetection();
+        updateButtons();
       } else if (e.key === "n" || e.key === "N") {
         handled = true;
         if (player.won) nextLevel();
-        else resetLevel();
+        else resetLevel(false);
       }
       if (handled) e.preventDefault();
     });
@@ -685,11 +944,29 @@
     bindTouchButton("btnDown", () => { keys.down = true; performTurn("move"); });
     bindTouchButton("btnLeft", () => { keys.left = true; performTurn("move"); });
     bindTouchButton("btnRight",() => { keys.right = true; performTurn("move"); });
-    bindTouchButton("btnWait", () => { keys.wait = true; performTurn("wait"); });
-    bindTouchButton("btnAction", () => { keys.action = true; performTurn("action"); });
+
+    bindTouchButton("btnAction", () => {
+      if (canUseActionHere() && player.alive && !player.won) {
+        doPlayerAction();
+        pickupIntelIfAny();
+        stepGuards();
+        checkDetection();
+        updateButtons();
+      }
+    });
+
+    bindTouchButton("btnSound", () => {
+      makeSound();
+      if (player.alive && !player.won) {
+        stepGuards();
+        checkDetection();
+      }
+      updateButtons();
+    });
+
     bindTouchButton("btnNew", () => {
       if (player.won) nextLevel();
-      else resetLevel();
+      else resetLevel(false);
     });
 
     // ===== Rendering =====
@@ -753,11 +1030,23 @@
         const b = barrels[i];
         const p = gridToCenter(b.col, b.row);
         const r = cellSize * 0.33;
+
+        // Dark drum
         ctx.beginPath();
-        ctx.fillStyle = "#555";
-        ctx.strokeStyle = "#222";
+        ctx.fillStyle = "#333";
+        ctx.strokeStyle = "#111";
         ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
         ctx.fill();
+        ctx.stroke();
+
+        // Horizontal bands so it reads as a barrel
+        ctx.strokeStyle = "#777";
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(p.x - r * 0.8, p.y - r * 0.4);
+        ctx.lineTo(p.x + r * 0.8, p.y - r * 0.4);
+        ctx.moveTo(p.x - r * 0.8, p.y + r * 0.4);
+        ctx.lineTo(p.x + r * 0.8, p.y + r * 0.4);
         ctx.stroke();
       }
     }
@@ -790,20 +1079,54 @@
       for (let i = 0; i < guards.length; i++) {
         const g = guards[i];
         const p = gridToCenter(g.col, g.row);
-        const w = cellSize * 0.7;
-        const h = cellSize * 0.7;
-        ctx.fillStyle = "#333";
-        ctx.strokeStyle = "#111";
-        ctx.beginPath();
-        ctx.rect(p.x - w / 2, p.y - h / 2, w, h);
-        ctx.fill();
-        ctx.stroke();
 
-        ctx.beginPath();
-        ctx.strokeStyle = "#eee";
-        ctx.moveTo(p.x - w * 0.3, p.y);
-        ctx.lineTo(p.x + w * 0.3, p.y);
-        ctx.stroke();
+        if (g.type === "camera") {
+          // Camera: dome on a stalk
+          const bodyW = cellSize * 0.7;
+          const bodyH = cellSize * 0.35;
+
+          // Stalk
+          ctx.strokeStyle = "#444";
+          ctx.beginPath();
+          ctx.moveTo(p.x, p.y + bodyH * 0.6);
+          ctx.lineTo(p.x, p.y + bodyH * 1.2);
+          ctx.stroke();
+
+          // Dome
+          ctx.fillStyle = "#888";
+          ctx.strokeStyle = "#333";
+          ctx.beginPath();
+          ctx.moveTo(p.x - bodyW / 2, p.y + bodyH / 2);
+          ctx.lineTo(p.x + bodyW / 2, p.y + bodyH / 2);
+          ctx.quadraticCurveTo(p.x, p.y - bodyH / 2, p.x - bodyW / 2, p.y + bodyH / 2);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+
+          // Lens
+          ctx.beginPath();
+          ctx.fillStyle = "#222";
+          const lensR = cellSize * 0.12;
+          ctx.arc(p.x + bodyW * 0.15, p.y, lensR, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          // Normal guard: blocky body
+          const w = cellSize * 0.7;
+          const h = cellSize * 0.7;
+          ctx.fillStyle = "#333";
+          ctx.strokeStyle = "#111";
+          ctx.beginPath();
+          ctx.rect(p.x - w / 2, p.y - h / 2, w, h);
+          ctx.fill();
+          ctx.stroke();
+
+          // visor stripe
+          ctx.beginPath();
+          ctx.strokeStyle = "#eee";
+          ctx.moveTo(p.x - w * 0.3, p.y);
+          ctx.lineTo(p.x + w * 0.3, p.y);
+          ctx.stroke();
+        }
       }
     }
 
@@ -857,9 +1180,9 @@
       ctx.font = "13px system-ui, sans-serif";
       ctx.textBaseline = "top";
       const lines = [
-        "Triangle = you. Intel = small square+cross.",
+        "Triangle = you. Intel = square+cross.",
         "Crates/barrels block vision. ACTION = explode barrel.",
-        "Get all intel then exit. NEW: restart / next mission."
+        "SOUND lures a guard. NEW: restart / next (random after 3)."
       ];
       let y = 6;
       for (let i = 0; i < lines.length; i++) {
@@ -923,7 +1246,7 @@
 
     // ===== Init =====
     resizeCanvas();
-    resetLevel();
+    resetLevel(true);
     requestAnimationFrame(gameLoop);
   </script>
 </body>
