@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Kindle Tank Game – Grid & Walls</title>
+  <title>Kindle Tank Game – Smooth Grid + Bombs</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <style>
     * {
@@ -23,7 +23,6 @@
       color: #111;
     }
 
-    /* Layout: canvas on top, controls on bottom, both centered */
     #gameContainer {
       display: flex;
       flex-direction: column;
@@ -65,7 +64,6 @@
       border: 1px solid #c8c2b5;
     }
 
-    /* Controls bar */
     #touchControlsBar {
       flex: 0 0 auto;
       display: flex;
@@ -88,19 +86,19 @@
     .ctrl-row {
       display: flex;
       justify-content: center;
-      gap: 1rem;
+      gap: 0.8rem;
       width: 100%;
     }
 
     .ctrl-btn {
       flex: 1 1 auto;
-      min-width: 4.5rem;
-      min-height: 4.5rem;
+      min-width: 4.3rem;
+      min-height: 4.3rem;
       border-radius: 1.2rem;
       border: 1px solid #857d6a;
       background: #fdfbf6;
       color: #111;
-      font-size: 1.6rem;
+      font-size: 1.5rem;
       font-weight: 600;
       padding: 0.4rem 0.6rem;
       cursor: pointer;
@@ -108,9 +106,9 @@
     }
 
     .ctrl-btn.wide {
-      min-width: 10rem;
-      font-size: 1.2rem;
-      flex: 0 0 auto;
+      min-width: 7rem;
+      font-size: 1.1rem;
+      flex: 1 1 0;
     }
 
     .ctrl-btn:active {
@@ -132,7 +130,7 @@
       <div id="uiOverlay">
         <div id="infoBar">
           <div><strong>Kindle Tank Game</strong></div>
-          <div>Tap arrows to rotate/move by 1 grid; FIRE to shoot; R/FIRE to restart.</div>
+          <div>Arrows/WASD move & turn, Space = FIRE, B = MINE, R/FIRE when dead = restart.</div>
         </div>
       </div>
     </div>
@@ -146,14 +144,15 @@
           <button id="btnRight" class="ctrl-btn">⟳</button>
         </div>
         <div class="ctrl-row">
-          <button id="btnShoot" class="ctrl-btn wide">FIRE</button>
+          <button id="btnFire" class="ctrl-btn wide">FIRE</button>
+          <button id="btnMine" class="ctrl-btn wide">MINE</button>
         </div>
       </div>
     </div>
   </div>
 
   <script>
-    // ======== Canvas & constants ========
+    // ======== Canvas & grid ========
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
 
@@ -161,21 +160,26 @@
       const rect = canvas.getBoundingClientRect();
       canvas.width = rect.width;
       canvas.height = rect.height;
+      recomputeGrid();
     }
     window.addEventListener("resize", resizeCanvas);
     resizeCanvas();
 
-    const TILE = 40; // background grid spacing
-    let tileCols = Math.max(8, Math.floor(canvas.width / TILE));
-    let tileRows = Math.max(6, Math.floor(canvas.height / TILE));
+    const TILE = 40;
+    let tileCols = 0;
+    let tileRows = 0;
+
+    function recomputeGrid() {
+      tileCols = Math.max(8, Math.floor(canvas.width / TILE));
+      tileRows = Math.max(6, Math.floor(canvas.height / TILE));
+    }
 
     function tileCenterX(c) { return c * TILE + TILE / 2; }
     function tileCenterY(r) { return r * TILE + TILE / 2; }
 
     // ======== Input ========
-    const keys = { left: false, right: false, forward: false, shoot: false };
+    const keys = { left: false, right: false, forward: false, fire: false, mine: false };
 
-    // Directions: 0 right, 1 down, 2 left, 3 up
     const DIRS = [
       { angle: 0,           vx: 1,  vy: 0 },
       { angle: Math.PI / 2, vx: 0,  vy: 1 },
@@ -183,44 +187,45 @@
       { angle: -Math.PI/2,  vx: 0,  vy: -1 }
     ];
 
-    // ======== Game objects ========
+    // ======== Game state ========
     const player = {
       col: 0, row: 0,
       x: 0, y: 0,
       dirIndex: 3,
       radius: 14,
       lives: 3,
-      alive: true
+      alive: true,
+      moving: false,
+      startX: 0, startY: 0,
+      targetCol: 0, targetRow: 0,
+      targetX: 0, targetY: 0,
+      moveProgress: 0
     };
 
-    const bullets = [];  // {x,y,vx,vy,life,fromEnemy}
-    const targets = [];  // {col,row,x,y,radius}
-    const enemies = [];  // {col,row,x,y,dirIndex,radius,shootCooldown,moveTimer}
-    const walls  = [];   // {col,row}
+    const bullets = []; // {x,y,vx,vy,life,fromEnemy}
+    const targets = []; // {x,y,radius}
+    const enemies = []; // tank objects like player (subset of fields)
+    const walls   = []; // {col,row}
+    const mines   = []; // {x,y,radius,timer,armed}
 
     let score = 0;
-    let shootCooldown = 0;
+    let fireCooldown = 0;
+    let mineCooldown = 0;
     let enemySpawnCooldown = 0;
 
+    // ======== Utility ========
     function randRange(min, max) { return Math.random() * (max - min) + min; }
     function distance(x1, y1, x2, y2) {
       const dx = x2 - x1, dy = y2 - y1;
       return Math.sqrt(dx * dx + dy * dy);
     }
 
-    // ======== Grid helpers ========
-    function sameTile(a, b) {
-      return a.col === b.col && a.row === b.row;
-    }
-
     function wallAt(c, r) {
       return walls.some(w => w.col === c && w.row === r);
     }
-
     function outOfBounds(c, r) {
       return c < 0 || r < 0 || c >= tileCols || r >= tileRows;
     }
-
     function blockedTile(c, r) {
       return outOfBounds(c, r) || wallAt(c, r);
     }
@@ -231,13 +236,13 @@
       return wallAt(c, r);
     }
 
-    // ======== World generation ========
+    // ======== World / level ========
     function createWalls() {
       walls.length = 0;
       const midC = Math.floor(tileCols / 2);
       const midR = Math.floor(tileRows / 2);
 
-      // plus-shaped central wall
+      // central T shape
       for (let r = midR - 2; r <= midR + 2; r++) {
         if (!outOfBounds(midC, r)) walls.push({ col: midC, row: r });
       }
@@ -246,33 +251,33 @@
         if (!outOfBounds(c, midR)) walls.push({ col: c, row: midR });
       }
 
-      // four corner pillars
-      const cornerOffsets = [
-        { col: 2, row: 2 },
-        { col: tileCols - 3, row: 2 },
-        { col: 2, row: tileRows - 3 },
-        { col: tileCols - 3, row: tileRows - 3 }
+      // side barriers (top and bottom bands)
+      for (let c = 2; c < tileCols - 2; c += 3) {
+        if (!outOfBounds(c, 2)) walls.push({ col: c, row: 2 });
+        if (!outOfBounds(c, tileRows - 3)) walls.push({ col: c, row: tileRows - 3 });
+      }
+
+      // four corner blocks
+      const corners = [
+        { col: 1, row: 1 },
+        { col: tileCols - 2, row: 1 },
+        { col: 1, row: tileRows - 2 },
+        { col: tileCols - 2, row: tileRows - 2 }
       ];
-      cornerOffsets.forEach(p => {
-        if (!outOfBounds(p.col, p.row))
-          walls.push({ col: p.col, row: p.row });
+      corners.forEach(p => {
+        if (!outOfBounds(p.col, p.row)) walls.push({ col: p.col, row: p.row });
       });
     }
 
-    function randomFreeTile(avoidPlayer = true) {
+    function randomFreeTile(awayFromPlayer = true) {
       let attempts = 0;
-      while (attempts < 500) {
+      while (attempts++ < 500) {
         const c = Math.floor(Math.random() * tileCols);
         const r = Math.floor(Math.random() * tileRows);
-        if (blockedTile(c, r)) { attempts++; continue; }
-
+        if (blockedTile(c, r)) continue;
         const x = tileCenterX(c);
         const y = tileCenterY(r);
-
-        if (avoidPlayer && distance(x, y, player.x, player.y) < TILE * 3) {
-          attempts++; continue;
-        }
-
+        if (awayFromPlayer && distance(x, y, player.x, player.y) < TILE * 3) continue;
         return { col: c, row: r, x, y };
       }
       return { col: 1, row: 1, x: tileCenterX(1), y: tileCenterY(1) };
@@ -280,59 +285,93 @@
 
     function spawnTarget() {
       const spot = randomFreeTile(true);
-      targets.push({
-        col: spot.col,
-        row: spot.row,
-        x: spot.x,
-        y: spot.y,
-        radius: 18
-      });
+      targets.push({ x: spot.x, y: spot.y, radius: 18 });
     }
 
-    function ensureTargets(count) {
-      while (targets.length < count) spawnTarget();
-    }
+    function ensureTargets(n) { while (targets.length < n) spawnTarget(); }
 
     function spawnEnemy() {
       const spot = randomFreeTile(true);
       enemies.push({
-        col: spot.col,
-        row: spot.row,
-        x: spot.x,
-        y: spot.y,
-        dirIndex: 1,
+        col: spot.col, row: spot.row,
+        x: spot.x, y: spot.y,
+        dirIndex: Math.floor(Math.random() * 4),
         radius: 14,
+        alive: true,
+        moving: false,
+        startX: spot.x,
+        startY: spot.y,
+        targetCol: spot.col,
+        targetRow: spot.row,
+        targetX: spot.x,
+        targetY: spot.y,
+        moveProgress: 0,
         shootCooldown: 2 + Math.random(),
-        moveTimer: 0
+        thinkCooldown: 0
       });
     }
 
-    function ensureEnemies(count) {
-      while (enemies.length < count) spawnEnemy();
+    function ensureEnemies(n) { while (enemies.length < n) spawnEnemy(); }
+
+    // ======== Tank movement (smooth along grid) ========
+    function startMoveTank(tank) {
+      if (tank.moving) return false;
+      const dir = DIRS[tank.dirIndex];
+      const nextCol = tank.col + dir.vx;
+      const nextRow = tank.row + dir.vy;
+      if (blockedTile(nextCol, nextRow)) return false;
+
+      tank.moving = true;
+      tank.startX = tank.x;
+      tank.startY = tank.y;
+      tank.targetCol = nextCol;
+      tank.targetRow = nextRow;
+      tank.targetX = tileCenterX(nextCol);
+      tank.targetY = tileCenterY(nextRow);
+      tank.moveProgress = 0;
+      return true;
     }
 
-    // ======== Input binding ========
+    function advanceTank(tank, speed, dt) {
+      if (!tank.moving) return;
+      tank.moveProgress += (speed * dt) / TILE; // 1.0 = one tile travelled
+      if (tank.moveProgress >= 1) {
+        tank.col = tank.targetCol;
+        tank.row = tank.targetRow;
+        tank.x = tank.targetX;
+        tank.y = tank.targetY;
+        tank.moving = false;
+      } else {
+        const t = tank.moveProgress;
+        tank.x = tank.startX + (tank.targetX - tank.startX) * t;
+        tank.y = tank.startY + (tank.targetY - tank.startY) * t;
+      }
+    }
+
+    function snapTankToGrid(tank) {
+      // just in case – ensures final position is exactly on grid
+      tank.col = Math.round((tank.x - TILE / 2) / TILE);
+      tank.row = Math.round((tank.y - TILE / 2) / TILE);
+      if (tank.col < 0) tank.col = 0;
+      if (tank.row < 0) tank.row = 0;
+      if (tank.col >= tileCols) tank.col = tileCols - 1;
+      if (tank.row >= tileRows) tank.row = tileRows - 1;
+      tank.x = tileCenterX(tank.col);
+      tank.y = tileCenterY(tank.row);
+    }
+
+    // ======== Input: keyboard ========
     document.addEventListener("keydown", e => {
       let handled = false;
       if (e.key === "r" || e.key === "R") {
         resetGame(); handled = true;
       } else {
         switch (e.key) {
-          case "ArrowLeft":
-          case "a":
-          case "A":
-            keys.left = true; handled = true; break;
-          case "ArrowRight":
-          case "d":
-          case "D":
-            keys.right = true; handled = true; break;
-          case "ArrowUp":
-          case "w":
-          case "W":
-            keys.forward = true; handled = true; break;
-          case " ":
-          case "Spacebar":
-            keys.shoot = true; handled = true; break;
+          case "ArrowLeft": case "a": case "A": keys.left = true; handled = true; break;
+          case "ArrowRight": case "d": case "D": keys.right = true; handled = true; break;
+          case "ArrowUp": case "w": case "W": keys.forward = true; handled = true; break;
+          case " ": case "Spacebar": keys.fire = true; handled = true; break;
+          case "b": case "B": keys.mine = true; handled = true; break;
         }
       }
       if (handled) e.preventDefault();
@@ -341,63 +380,35 @@
     document.addEventListener("keyup", e => {
       let handled = false;
       switch (e.key) {
-        case "ArrowLeft":
-        case "a":
-        case "A":
-          keys.left = false; handled = true; break;
-        case "ArrowRight":
-        case "d":
-        case "D":
-          keys.right = false; handled = true; break;
-        case "ArrowUp":
-        case "w":
-        case "W":
-          keys.forward = false; handled = true; break;
-        case " ":
-        case "Spacebar":
-          keys.shoot = false; handled = true; break;
+        case "ArrowLeft": case "a": case "A": keys.left = false; handled = true; break;
+        case "ArrowRight": case "d": case "D": keys.right = false; handled = true; break;
+        case "ArrowUp": case "w": case "W": keys.forward = false; handled = true; break;
+        case " ": case "Spacebar": keys.fire = false; handled = true; break;
+        case "b": case "B": keys.mine = false; handled = true; break;
       }
       if (handled) e.preventDefault();
     });
 
-    function bindControl(buttonId, keyName) {
-      const btn = document.getElementById(buttonId);
+    // ======== Input: touch ========
+    function bindButton(id, keyName) {
+      const btn = document.getElementById(id);
       if (!btn) return;
-
-      const activate = ev => { ev.preventDefault(); keys[keyName] = true; };
-      const deactivate = ev => { ev.preventDefault(); keys[keyName] = false; };
-
-      btn.addEventListener("touchstart", activate, { passive: false });
-      btn.addEventListener("touchend", deactivate, { passive: false });
-      btn.addEventListener("touchcancel", deactivate, { passive: false });
-
-      btn.addEventListener("mousedown", activate);
+      const down = ev => { ev.preventDefault(); keys[keyName] = true; };
+      const up = ev => { ev.preventDefault(); keys[keyName] = false; };
+      btn.addEventListener("touchstart", down, { passive: false });
+      btn.addEventListener("touchend", up, { passive: false });
+      btn.addEventListener("touchcancel", up, { passive: false });
+      btn.addEventListener("mousedown", down);
       document.addEventListener("mouseup", () => { keys[keyName] = false; });
     }
 
-    bindControl("btnLeft", "left");
-    bindControl("btnRight", "right");
-    bindControl("btnForward", "forward");
-    bindControl("btnShoot", "shoot");
+    bindButton("btnLeft", "left");
+    bindButton("btnRight", "right");
+    bindButton("btnForward", "forward");
+    bindButton("btnFire", "fire");
+    bindButton("btnMine", "mine");
 
-    // ======== Movement helpers ========
-    function applyTankPos(tank) {
-      tank.x = tileCenterX(tank.col);
-      tank.y = tileCenterY(tank.row);
-    }
-
-    function tryMoveTankOneTile(tank) {
-      const dir = DIRS[tank.dirIndex];
-      const nextC = tank.col + dir.vx;
-      const nextR = tank.row + dir.vy;
-      if (blockedTile(nextC, nextR)) return false;
-      tank.col = nextC;
-      tank.row = nextR;
-      applyTankPos(tank);
-      return true;
-    }
-
-    // ======== Shooting ========
+    // ======== Weapons ========
     function fireBullet(source, speed, fromEnemy) {
       const dir = DIRS[source.dirIndex];
       const bx = source.x + dir.vx * (source.radius + 6);
@@ -412,6 +423,36 @@
       });
     }
 
+    function dropMine() {
+      if (mines.length >= 3) return;          // limit active mines
+      const radius = TILE * 0.9;
+      mines.push({
+        x: player.x,
+        y: player.y,
+        radius,
+        timer: 0,
+        armed: false
+      });
+    }
+
+    function explodeMine(index) {
+      const m = mines[index];
+      const blastR = m.radius;
+      // damage enemies
+      for (let i = enemies.length - 1; i >= 0; i--) {
+        const e = enemies[i];
+        if (distance(m.x, m.y, e.x, e.y) < blastR) {
+          enemies.splice(i, 1);
+          score += 3;
+        }
+      }
+      // damage player too
+      if (player.alive && distance(m.x, m.y, player.x, player.y) < blastR) {
+        hitPlayer();
+      }
+      mines.splice(index, 1);
+    }
+
     function hitPlayer() {
       if (!player.alive) return;
       player.lives--;
@@ -420,17 +461,15 @@
 
     // ======== Reset ========
     function resetGame() {
-      tileCols = Math.max(8, Math.floor(canvas.width / TILE));
-      tileRows = Math.max(6, Math.floor(canvas.height / TILE));
-
+      recomputeGrid();
       bullets.length = 0;
       targets.length = 0;
       enemies.length = 0;
       walls.length = 0;
+      mines.length = 0;
 
       createWalls();
 
-      // Place player near bottom center
       const startCol = Math.floor(tileCols / 2);
       const startRow = tileRows - 3;
       player.col = startCol;
@@ -439,25 +478,32 @@
       player.radius = 14;
       player.lives = 3;
       player.alive = true;
-      applyTankPos(player);
+      player.moving = false;
+      player.moveProgress = 0;
+      snapTankToGrid(player);
 
       score = 0;
-      shootCooldown = 0;
+      fireCooldown = 0;
+      mineCooldown = 0;
       enemySpawnCooldown = 0;
 
       ensureTargets(4);
       ensureEnemies(2);
     }
 
-    // ======== Updates ========
+    // ======== Update ========
     function update(dt) {
       if (!player.alive) {
-        if (keys.shoot) { keys.shoot = false; resetGame(); }
+        if (keys.fire) { keys.fire = false; resetGame(); }
         updateBullets(dt);
+        updateEnemies(dt);
+        updateMines(dt);
         return;
       }
 
-      // Rotation: one 90° step per tap
+      const moveSpeed = 140;
+
+      // rotate (snap rotation – no need to be moving)
       if (keys.left) {
         keys.left = false;
         player.dirIndex = (player.dirIndex + 3) % 4;
@@ -467,28 +513,67 @@
         player.dirIndex = (player.dirIndex + 1) % 4;
       }
 
-      // Movement: one tile per tap
-      if (keys.forward) {
-        keys.forward = false;
-        tryMoveTankOneTile(player);
+      // movement: if holding forward and not already moving, start next tile
+      if (keys.forward && !player.moving) {
+        startMoveTank(player);
       }
 
-      // Shooting
-      shootCooldown -= dt;
-      if (shootCooldown < 0) shootCooldown = 0;
-      if (keys.shoot && shootCooldown === 0) {
+      // progress current move
+      advanceTank(player, moveSpeed, dt);
+
+      // extra safety: if not moving, snap perfectly to grid
+      if (!player.moving) snapTankToGrid(player);
+
+      // shooting
+      fireCooldown -= dt;
+      if (fireCooldown < 0) fireCooldown = 0;
+      if (keys.fire && fireCooldown === 0) {
         fireBullet(player, 220, false);
-        shootCooldown = 0.55;
+        fireCooldown = 0.45;
       }
 
+      // mines
+      mineCooldown -= dt;
+      if (mineCooldown < 0) mineCooldown = 0;
+      if (keys.mine && mineCooldown === 0) {
+        dropMine();
+        mineCooldown = 1.0;
+      }
+
+      updateMines(dt);
       updateBullets(dt);
       updateEnemies(dt);
+
       ensureTargets(4);
 
       enemySpawnCooldown -= dt;
       if (enemySpawnCooldown < 0) {
         enemySpawnCooldown = 7 + Math.random() * 3;
         if (enemies.length < 3) spawnEnemy();
+      }
+    }
+
+    function updateMines(dt) {
+      for (let i = mines.length - 1; i >= 0; i--) {
+        const m = mines[i];
+        m.timer += dt;
+        if (!m.armed && m.timer > 0.8) m.armed = true;
+        if (m.timer > 4) {
+          explodeMine(i);
+          continue;
+        }
+        if (!m.armed) continue;
+        // explode if any tank steps close
+        for (const e of enemies) {
+          if (distance(m.x, m.y, e.x, e.y) < m.radius * 0.6) {
+            explodeMine(i);
+            break;
+          }
+        }
+        if (i >= mines.length) continue; // might have been removed
+        if (player.alive && distance(m.x, m.y, player.x, player.y) < m.radius * 0.6) {
+          explodeMine(i);
+        }
       }
     }
 
@@ -518,7 +603,7 @@
         } else if (!b.fromEnemy) {
           let hit = false;
 
-          // Targets
+          // targets
           for (let j = targets.length - 1; j >= 0; j--) {
             const t = targets[j];
             if (distance(b.x, b.y, t.x, t.y) < t.radius) {
@@ -530,7 +615,7 @@
           }
           if (hit) { bullets.splice(i, 1); continue; }
 
-          // Enemies
+          // enemies
           for (let k = enemies.length - 1; k >= 0; k--) {
             const e = enemies[k];
             if (distance(b.x, b.y, e.x, e.y) < e.radius) {
@@ -546,38 +631,62 @@
     }
 
     function updateEnemies(dt) {
+      const moveSpeed = 90;
+
       for (const e of enemies) {
-        // Choose direction every ~0.5 s
-        e.moveTimer += dt;
-        if (e.moveTimer > 0.5) {
-          e.moveTimer = 0;
+        if (!e.alive) continue;
+
+        // decide where to go when not moving
+        e.thinkCooldown -= dt;
+        if (e.thinkCooldown < 0) e.thinkCooldown = 0;
+
+        if (!e.moving && e.thinkCooldown === 0) {
+          e.thinkCooldown = 0.4 + Math.random() * 0.3;
+
+          // desire: roughly toward player
           const dx = player.col - e.col;
           const dy = player.row - e.row;
-          if (Math.abs(dx) > Math.abs(dy)) {
-            e.dirIndex = dx > 0 ? 0 : 2;
-          } else {
-            e.dirIndex = dy > 0 ? 1 : 3;
+          const preferredDir = Math.abs(dx) > Math.abs(dy)
+            ? (dx > 0 ? 0 : 2)
+            : (dy > 0 ? 1 : 3);
+
+          const dirCandidates = [preferredDir,
+            (preferredDir + 1) % 4,
+            (preferredDir + 3) % 4,
+            (preferredDir + 2) % 4];
+
+          for (let d of dirCandidates) {
+            e.dirIndex = d;
+            const dir = DIRS[d];
+            const nc = e.col + dir.vx;
+            const nr = e.row + dir.vy;
+            if (!blockedTile(nc, nr)) {
+              startMoveTank(e);
+              break;
+            }
           }
-          tryMoveTankOneTile(e);
         }
 
-        // Touching the player?
-        if (player.alive && e.col === player.col && e.row === player.row) {
+        advanceTank(e, moveSpeed, dt);
+        if (!e.moving) snapTankToGrid(e);
+
+        // collision with player
+        if (player.alive && distance(e.x, e.y, player.x, player.y) < e.radius + player.radius - 4) {
           hitPlayer();
         }
 
-        // Shooting when aligned on row/column with player
+        // shooting when on same row/col with clear path
         e.shootCooldown -= dt;
         if (e.shootCooldown < 0) e.shootCooldown = 0;
 
         if (e.shootCooldown === 0 && player.alive) {
           const dx = player.col - e.col;
           const dy = player.row - e.row;
+          const dir = DIRS[e.dirIndex];
 
-          const alignedRow = dy === 0 && Math.sign(dx) === DIRS[e.dirIndex].vx;
-          const alignedCol = dx === 0 && Math.sign(dy) === DIRS[e.dirIndex].vy;
+          const alignedRow = (dy === 0 && Math.sign(dx) === dir.vx);
+          const alignedCol = (dx === 0 && Math.sign(dy) === dir.vy);
 
-          // Only shoot if no wall between them
           let clear = false;
           if (alignedRow) {
             clear = true;
@@ -595,7 +704,7 @@
 
           if (clear && (alignedRow || alignedCol)) {
             fireBullet(e, 80, true);
-            e.shootCooldown = 2.3 + Math.random();
+            e.shootCooldown = 2.5 + Math.random();
           }
         }
       }
@@ -645,6 +754,15 @@
       ctx.fillRect(0, -4, 18, 8);
 
       ctx.restore();
+    }
+
+    function drawMines() {
+      for (const m of mines) {
+        ctx.beginPath();
+        ctx.fillStyle = m.armed ? "#555" : "#999";
+        ctx.arc(m.x, m.y, 6, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     function drawPlayer() {
@@ -707,11 +825,12 @@
       drawTargets();
       drawEnemies();
       drawBullets();
+      drawMines();
       drawPlayer();
       drawHUD();
     }
 
-    // ======== Game loop (≈6 fps) ========
+    // ======== Game loop (≈6 fps updates, but smooth-ish) ========
     let lastTime = 0;
     let accumulator = 0;
     const STEP = 1 / 6;
@@ -732,7 +851,6 @@
       requestAnimationFrame(gameLoop);
     }
 
-    // Start
     resetGame();
     requestAnimationFrame(gameLoop);
   </script>
