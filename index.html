@@ -165,7 +165,6 @@
       setupWalls();
     }
     window.addEventListener("resize", resizeCanvas);
-    resizeCanvas();
 
     const TILE = 40;
 
@@ -848,6 +847,7 @@
     }
 
     resetGame();
+    resizeCanvas(); 
     requestAnimationFrame(gameLoop);
   </script>
 </body>
