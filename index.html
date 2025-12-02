@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Kindle Tank Game – Walls & Bombs</title>
+  <title>Kindle Tank Game – Grid Walls & Mines</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <style>
     * {
@@ -23,7 +23,6 @@
       color: #111;
     }
 
-    /* Layout: canvas on top, controls on bottom */
     #gameContainer {
       display: flex;
       flex-direction: column;
@@ -65,7 +64,6 @@
       border: 1px solid #c8c2b5;
     }
 
-    /* Controls bar */
     #touchControlsBar {
       flex: 0 0 auto;
       display: flex;
@@ -132,12 +130,11 @@
       <div id="uiOverlay">
         <div id="infoBar">
           <div><strong>Kindle Tank Game</strong></div>
-          <div>Arrows/WASD = move & turn, Space = FIRE, B = MINE, R/FIRE when dead = restart.</div>
+          <div>Arrows/WASD move & turn • Space = FIRE • B = MINE • R/FIRE when dead = restart.</div>
         </div>
       </div>
     </div>
 
-    <!-- Centered controls -->
     <div id="touchControlsBar">
       <div id="touchControls">
         <div class="ctrl-row">
@@ -154,24 +151,20 @@
   </div>
 
   <script>
-    // ===== Canvas & resize =====
+    // ====== Canvas & grid setup ======
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
 
-    function resizeCanvas() {
-      const rect = canvas.getBoundingClientRect();
-      canvas.width = rect.width;
-      canvas.height = rect.height;
-      setupWalls();
-    }
-    window.addEventListener("resize", resizeCanvas);
-
     const TILE = 40;
+    let tileCols = 0;
+    let tileRows = 0;
 
-    // ===== Input state =====
+    function tileCenterX(col) { return col * TILE + TILE / 2; }
+    function tileCenterY(row) { return row * TILE + TILE / 2; }
+
+    // ====== Input & directions ======
     const keys = { left: false, right: false, forward: false, fire: false, mine: false };
 
-    // Directions: 0 right, 1 down, 2 left, 3 up
     const DIRS = [
       { angle: 0,           vx: 1,  vy: 0 },
       { angle: Math.PI / 2, vx: 0,  vy: 1 },
@@ -179,7 +172,7 @@
       { angle: -Math.PI/2,  vx: 0,  vy: -1 }
     ];
 
-    // ===== Game objects =====
+    // ====== Game state ======
     const player = {
       x: 0, y: 0,
       dirIndex: 3,
@@ -188,43 +181,49 @@
       alive: true
     };
 
-    const bullets = []; // {x,y,vx,vy,life,fromEnemy}
-    const targets = []; // {x,y,radius}
-    const enemies = []; // {x,y,dirIndex,radius,shootCooldown,moveTimer}
-    const walls   = []; // {x,y,w,h}
-    const mines   = []; // {x,y,timer,armed}
+    const bullets = [];   // {x,y,vx,vy,life,fromEnemy}
+    const targets = [];   // {x,y,radius}
+    const enemies = [];   // {x,y,dirIndex,radius,shootCooldown,moveTimer}
+    const walls   = [];   // {x,y,w,h}
+    const mines   = [];   // {x,y,timer,armed}
+    const explosions = []; // {x,y,age,duration}
 
     let score = 0;
     let fireCooldown = 0;
     let mineCooldown = 0;
     let enemySpawnCooldown = 0;
 
-    // ===== Helpers =====
+    // ====== Helpers ======
     function randRange(min, max) { return Math.random() * (max - min) + min; }
+
     function distance(x1, y1, x2, y2) {
       const dx = x2 - x1, dy = y2 - y1;
       return Math.sqrt(dx * dx + dy * dy);
     }
 
-    function snapToGrid(obj, amount) {
-      const gx = Math.round(obj.x / TILE) * TILE;
-      const gy = Math.round(obj.y / TILE) * TILE;
-      obj.x += (gx - obj.x) * amount;
-      obj.y += (gy - obj.y) * amount;
+    function clamp(v, min, max) {
+      if (v < min) return min;
+      if (v > max) return max;
+      return v;
     }
 
-    // circle-rect collision
     function circleRectCollides(cx, cy, r, rect) {
       const rx = rect.x;
       const ry = rect.y;
       const rw = rect.w;
       const rh = rect.h;
-
       const nearestX = Math.max(rx, Math.min(cx, rx + rw));
       const nearestY = Math.max(ry, Math.min(cy, ry + rh));
       const dx = cx - nearestX;
       const dy = cy - nearestY;
       return (dx * dx + dy * dy) <= r * r;
+    }
+
+    function positionHitsWall(x, y, radius) {
+      for (let i = 0; i < walls.length; i++) {
+        if (circleRectCollides(x, y, radius, walls[i])) return true;
+      }
+      return false;
     }
 
     function bulletHitsWall(b) {
@@ -237,84 +236,124 @@
       return false;
     }
 
-    // ===== Walls & targets & enemies =====
+    function snapTankToGrid(obj) {
+      // Snap center to nearest tile center
+      let col = Math.round((obj.x - TILE / 2) / TILE);
+      let row = Math.round((obj.y - TILE / 2) / TILE);
+      col = clamp(col, 0, tileCols - 1);
+      row = clamp(row, 0, tileRows - 1);
+      obj.x = tileCenterX(col);
+      obj.y = tileCenterY(row);
+    }
+
+    // ====== Grid & wall layout ======
+    function recomputeGrid() {
+      tileCols = Math.max(8, Math.floor(canvas.width / TILE));
+      tileRows = Math.max(6, Math.floor(canvas.height / TILE));
+    }
+
+    function isWallTile(col, row) {
+      const x = col * TILE;
+      const y = row * TILE;
+      for (let i = 0; i < walls.length; i++) {
+        const w = walls[i];
+        if (w.x === x && w.y === y) return true;
+      }
+      return false;
+    }
+
     function setupWalls() {
       walls.length = 0;
-      const w = canvas.width;
-      const h = canvas.height;
 
-      const midX = w / 2;
-      const midY = h / 2;
+      const midC = Math.floor(tileCols / 2);
+      const midR = Math.floor(tileRows / 2);
 
-      // central T shape
-      const barThickness = 30;
-      const barLength = h * 0.35;
-      // vertical piece
-      walls.push({
-        x: midX - barThickness / 2,
-        y: midY - barLength / 2,
-        w: barThickness,
-        h: barLength
-      });
-      // horizontal piece
-      walls.push({
-        x: midX - (w * 0.25),
-        y: midY - barThickness / 2,
-        w: w * 0.5,
-        h: barThickness
-      });
+      // central T vertical
+      for (let r = midR - 2; r <= midR + 2; r++) {
+        if (r < 0 || r >= tileRows) continue;
+        walls.push({ x: midC * TILE, y: r * TILE, w: TILE, h: TILE });
+      }
+      // central T horizontal
+      for (let c = midC - 3; c <= midC + 3; c++) {
+        if (c < 0 || c >= tileCols || c === midC) continue;
+        walls.push({ x: c * TILE, y: midR * TILE, w: TILE, h: TILE });
+      }
 
-      // side barriers top & bottom
-      const sideW = 50;
-      const sideH = 120;
-      const marginX = 60;
-      const marginY = 40;
+      // top & bottom scattered walls
+      for (let c = 2; c < tileCols - 2; c += 3) {
+        if (!isWallTile(c, 2)) {
+          walls.push({ x: c * TILE, y: 2 * TILE, w: TILE, h: TILE });
+        }
+        if (!isWallTile(c, tileRows - 3)) {
+          walls.push({ x: c * TILE, y: (tileRows - 3) * TILE, w: TILE, h: TILE });
+        }
+      }
 
-      walls.push({ x: marginX, y: marginY, w: sideW, h: sideH });
-      walls.push({ x: w - marginX - sideW, y: marginY, w: sideW, h: sideH });
+      // four corners
+      const cornerTiles = [
+        { c: 1, r: 1 },
+        { c: tileCols - 2, r: 1 },
+        { c: 1, r: tileRows - 2 },
+        { c: tileCols - 2, r: tileRows - 2 }
+      ];
+      for (let i = 0; i < cornerTiles.length; i++) {
+        const ct = cornerTiles[i];
+        if (ct.c >= 0 && ct.c < tileCols && ct.r >= 0 && ct.r < tileRows) {
+          if (!isWallTile(ct.c, ct.r)) {
+            walls.push({ x: ct.c * TILE, y: ct.r * TILE, w: TILE, h: TILE });
+          }
+        }
+      }
+    }
 
-      walls.push({ x: marginX, y: h - marginY - sideH, w: sideW, h: sideH });
-      walls.push({ x: w - marginX - sideW, y: h - marginY - sideH, w: sideW, h: sideH });
+    function resizeCanvas() {
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+      recomputeGrid();
+      setupWalls();
+    }
+
+    window.addEventListener("resize", resizeCanvas);
+
+    // ====== Spawning ======
+    function randomFreeTile(minDistanceFromPlayer) {
+      let attempts = 0;
+      while (attempts < 300) {
+        const col = Math.floor(Math.random() * tileCols);
+        const row = Math.floor(Math.random() * tileRows);
+        attempts++;
+
+        if (isWallTile(col, row)) continue;
+
+        const x = tileCenterX(col);
+        const y = tileCenterY(row);
+
+        if (distance(x, y, player.x, player.y) < minDistanceFromPlayer) continue;
+
+        // also avoid very edge rows/cols to keep stuff inside arena
+        if (col <= 0 || col >= tileCols - 1 || row <= 0 || row >= tileRows - 1) continue;
+
+        return { col: col, row: row, x: x, y: y };
+      }
+      // fallback
+      return { col: 1, row: 1, x: tileCenterX(1), y: tileCenterY(1) };
     }
 
     function spawnTarget() {
-      const radius = 18;
-      let x, y, attempts = 0;
-      do {
-        x = randRange(radius + 10, canvas.width - radius - 10);
-        y = randRange(radius + 10, canvas.height - radius - 10);
-        attempts++;
-        if (attempts > 50) break;
-      } while (distance(x, y, player.x, player.y) < 120 || positionHitsWall(x, y, radius + 2));
-      targets.push({ x, y, radius });
+      const spot = randomFreeTile(TILE * 3);
+      targets.push({ x: spot.x, y: spot.y, radius: 18 });
     }
 
     function ensureTargets(count) {
       while (targets.length < count) spawnTarget();
     }
 
-    function positionHitsWall(x, y, radius) {
-      for (let i = 0; i < walls.length; i++) {
-        if (circleRectCollides(x, y, radius, walls[i])) return true;
-      }
-      return false;
-    }
-
     function spawnEnemy() {
-      const margin = 30;
-      let x, y, attempts = 0;
-      do {
-        x = randRange(margin, canvas.width - margin);
-        y = randRange(margin, canvas.height - margin);
-        attempts++;
-        if (attempts > 80) break;
-      } while (
-        distance(x, y, player.x, player.y) < 180 ||
-        positionHitsWall(x, y, 16)
-      );
+      const spot = randomFreeTile(TILE * 4);
       enemies.push({
-        x: x,
-        y: y,
+        x: spot.x,
+        y: spot.y,
         dirIndex: Math.floor(Math.random() * 4),
         radius: 14,
         shootCooldown: 2 + Math.random(),
@@ -326,18 +365,32 @@
       while (enemies.length < count) spawnEnemy();
     }
 
-    // ===== Input: keyboard =====
+    // ====== Input: keyboard ======
     document.addEventListener("keydown", function(e) {
       let handled = false;
       if (e.key === "r" || e.key === "R") {
-        resetGame(); handled = true;
+        resetGame();
+        handled = true;
       } else {
         switch (e.key) {
-          case "ArrowLeft": case "a": case "A": keys.left = true; handled = true; break;
-          case "ArrowRight": case "d": case "D": keys.right = true; handled = true; break;
-          case "ArrowUp": case "w": case "W": keys.forward = true; handled = true; break;
-          case " ": case "Spacebar": keys.fire = true; handled = true; break;
-          case "b": case "B": keys.mine = true; handled = true; break;
+          case "ArrowLeft":
+          case "a":
+          case "A":
+            keys.left = true; handled = true; break;
+          case "ArrowRight":
+          case "d":
+          case "D":
+            keys.right = true; handled = true; break;
+          case "ArrowUp":
+          case "w":
+          case "W":
+            keys.forward = true; handled = true; break;
+          case " ":
+          case "Spacebar":
+            keys.fire = true; handled = true; break;
+          case "b":
+          case "B":
+            keys.mine = true; handled = true; break;
         }
       }
       if (handled) e.preventDefault();
@@ -346,22 +399,35 @@
     document.addEventListener("keyup", function(e) {
       let handled = false;
       switch (e.key) {
-        case "ArrowLeft": case "a": case "A": keys.left = false; handled = true; break;
-        case "ArrowRight": case "d": case "D": keys.right = false; handled = true; break;
-        case "ArrowUp": case "w": case "W": keys.forward = false; handled = true; break;
-        case " ": case "Spacebar": keys.fire = false; handled = true; break;
-        case "b": case "B": keys.mine = false; handled = true; break;
+        case "ArrowLeft":
+        case "a":
+        case "A":
+          keys.left = false; handled = true; break;
+        case "ArrowRight":
+        case "d":
+        case "D":
+          keys.right = false; handled = true; break;
+        case "ArrowUp":
+        case "w":
+        case "W":
+          keys.forward = false; handled = true; break;
+        case " ":
+        case "Spacebar":
+          keys.fire = false; handled = true; break;
+        case "b":
+        case "B":
+          keys.mine = false; handled = true; break;
       }
       if (handled) e.preventDefault();
     });
 
-    // ===== Input: touch =====
+    // ====== Input: touch buttons ======
     function bindButton(btnId, keyName) {
       const btn = document.getElementById(btnId);
       if (!btn) return;
 
       const down = function(ev) { ev.preventDefault(); keys[keyName] = true; };
-      const up = function(ev) { ev.preventDefault(); keys[keyName] = false; };
+      const up   = function(ev) { ev.preventDefault(); keys[keyName] = false; };
 
       btn.addEventListener("touchstart", down, { passive: false });
       btn.addEventListener("touchend", up, { passive: false });
@@ -377,7 +443,7 @@
     bindButton("btnFire", "fire");
     bindButton("btnMine", "mine");
 
-    // ===== Weapons =====
+    // ====== Weapons & mines ======
     function fireBullet(source, speed, fromEnemy) {
       const dir = DIRS[source.dirIndex];
       const bx = source.x + dir.vx * (source.radius + 6);
@@ -394,29 +460,29 @@
 
     function dropMine() {
       if (mines.length >= 3) return;
-      mines.push({
-        x: player.x,
-        y: player.y,
-        timer: 0,
-        armed: false
-      });
+      mines.push({ x: player.x, y: player.y, timer: 0, armed: false });
     }
 
     function explodeMine(index) {
       const m = mines[index];
-      const blastR = 70;
-      // enemies
+      const blastRadius = TILE * 2;
+      // record explosion for visual
+      explosions.push({ x: m.x, y: m.y, age: 0, duration: 0.35 });
+
+      // kill enemies in range
       for (let i = enemies.length - 1; i >= 0; i--) {
         const e = enemies[i];
-        if (distance(m.x, m.y, e.x, e.y) < blastR) {
+        if (distance(m.x, m.y, e.x, e.y) < blastRadius) {
           enemies.splice(i, 1);
           score += 3;
         }
       }
-      // player
-      if (player.alive && distance(m.x, m.y, player.x, player.y) < blastR) {
+
+      // damage player too
+      if (player.alive && distance(m.x, m.y, player.x, player.y) < blastRadius) {
         hitPlayer();
       }
+
       mines.splice(index, 1);
     }
 
@@ -426,10 +492,13 @@
       if (player.lives <= 0) player.alive = false;
     }
 
-    // ===== Reset =====
+    // ====== Reset ======
     function resetGame() {
-      player.x = canvas.width / 2;
-      player.y = canvas.height * 0.75;
+      // start player near bottom center on grid
+      const startCol = Math.floor(tileCols / 2);
+      const startRow = tileRows - 3;
+      player.x = tileCenterX(startCol);
+      player.y = tileCenterY(startRow);
       player.dirIndex = 3; // up
       player.radius = 14;
       player.lives = 3;
@@ -439,24 +508,25 @@
       targets.length = 0;
       enemies.length = 0;
       mines.length = 0;
+      explosions.length = 0;
 
       score = 0;
       fireCooldown = 0;
       mineCooldown = 0;
       enemySpawnCooldown = 0;
 
-      setupWalls();
       ensureTargets(4);
       ensureEnemies(2);
     }
 
-    // ===== Update =====
+    // ====== Update ======
     function update(dt) {
       if (!player.alive) {
         if (keys.fire) { keys.fire = false; resetGame(); }
         updateBullets(dt);
         updateEnemies(dt);
         updateMines(dt);
+        updateExplosions(dt);
         return;
       }
 
@@ -481,25 +551,26 @@
         player.y += dir.vy * moveSpeed * dt;
       }
 
-      // clamp world bounds
-      const m = player.radius + 3;
-      if (player.x < m) player.x = m;
-      if (player.x > canvas.width - m) player.x = canvas.width - m;
-      if (player.y < m) player.y = m;
-      if (player.y > canvas.height - m) player.y = canvas.height - m;
+      // clamp to bounds
+      const margin = player.radius + 3;
+      player.x = clamp(player.x, margin, canvas.width - margin);
+      player.y = clamp(player.y, margin, canvas.height - margin);
 
-      // wall collision (player)
-      for (let i = 0; i < walls.length; i++) {
-        if (circleRectCollides(player.x, player.y, player.radius, walls[i])) {
-          player.x = oldX;
-          player.y = oldY;
-          break;
-        }
+      // wall collision for player
+      if (positionHitsWall(player.x, player.y, player.radius)) {
+        player.x = oldX;
+        player.y = oldY;
       }
 
-      // gentle grid snapping when not moving forward
+      // instant snap to grid when not moving forward
       if (!keys.forward) {
-        snapToGrid(player, 0.15);
+        const sx = player.x;
+        const sy = player.y;
+        snapTankToGrid(player);
+        if (positionHitsWall(player.x, player.y, player.radius)) {
+          player.x = sx;
+          player.y = sy; // avoid snapping into wall tile
+        }
       }
 
       // shooting
@@ -521,6 +592,7 @@
       updateMines(dt);
       updateBullets(dt);
       updateEnemies(dt);
+      updateExplosions(dt);
 
       ensureTargets(4);
       enemySpawnCooldown -= dt;
@@ -534,23 +606,22 @@
       for (let i = mines.length - 1; i >= 0; i--) {
         const m = mines[i];
         m.timer += dt;
-        if (!m.armed && m.timer > 0.8) m.armed = true;
+        if (!m.armed && m.timer > 0.7) m.armed = true;
         if (m.timer > 4) {
           explodeMine(i);
-          continue;
-        }
-        if (!m.armed) continue;
-
-        for (let j = enemies.length - 1; j >= 0; j--) {
-          const e = enemies[j];
-          if (distance(m.x, m.y, e.x, e.y) < 50) {
-            explodeMine(i);
-            break;
+        } else if (m.armed) {
+          // explode if anyone gets too close
+          for (let j = enemies.length - 1; j >= 0; j--) {
+            const e = enemies[j];
+            if (distance(m.x, m.y, e.x, e.y) < TILE * 1.3) {
+              explodeMine(i);
+              break;
+            }
           }
-        }
-        if (i >= mines.length) continue;
-        if (player.alive && distance(m.x, m.y, player.x, player.y) < 50) {
-          explodeMine(i);
+          if (i >= mines.length) continue; // might have been removed
+          if (player.alive && distance(m.x, m.y, player.x, player.y) < TILE * 1.3) {
+            explodeMine(i);
+          }
         }
       }
     }
@@ -615,11 +686,11 @@
     }
 
     function updateEnemies(dt) {
-      const speed = 60;
+      const speed = 70;
       for (let i = 0; i < enemies.length; i++) {
         const e = enemies[i];
 
-        // move toward player with simple avoidance
+        // steering toward player
         e.moveTimer += dt;
         if (e.moveTimer > 0.25) {
           e.moveTimer = 0;
@@ -635,62 +706,56 @@
         const dir = DIRS[e.dirIndex];
         const oldX = e.x;
         const oldY = e.y;
+
         e.x += dir.vx * speed * dt;
         e.y += dir.vy * speed * dt;
 
-        // bounds
         const r = e.radius + 3;
-        if (e.x < r || e.x > canvas.width - r || e.y < r || e.y > canvas.height - r) {
+        e.x = clamp(e.x, r, canvas.width - r);
+        e.y = clamp(e.y, r, canvas.height - r);
+
+        // collision with walls: bounce / turn
+        if (positionHitsWall(e.x, e.y, e.radius)) {
           e.x = oldX;
           e.y = oldY;
-          e.dirIndex = (e.dirIndex + 1) % 4;
-        } else {
-          // walls
-          for (let w = 0; w < walls.length; w++) {
-            if (circleRectCollides(e.x, e.y, e.radius, walls[w])) {
-              e.x = oldX;
-              e.y = oldY;
-              e.dirIndex = (e.dirIndex + 1 + Math.floor(Math.random() * 3)) % 4;
-              break;
-            }
-          }
+          e.dirIndex = (e.dirIndex + 1 + Math.floor(Math.random() * 3)) % 4;
         }
 
-        // gentle snap for enemies too
-        snapToGrid(e, 0.07);
+        // snap enemies to grid too when not moving much
+        snapTankToGrid(e);
+        if (positionHitsWall(e.x, e.y, e.radius)) {
+          e.x = oldX;
+          e.y = oldY;
+        }
 
         // collision with player
         if (player.alive && distance(e.x, e.y, player.x, player.y) < e.radius + player.radius - 3) {
           hitPlayer();
         }
 
-        // shooting
+        // shooting when roughly aligned with player
         e.shootCooldown -= dt;
         if (e.shootCooldown < 0) e.shootCooldown = 0;
 
         if (e.shootCooldown === 0 && player.alive) {
-          const dx2 = player.x - e.x;
-          const dy2 = player.y - e.y;
+          const dx = player.x - e.x;
+          const dy = player.y - e.y;
           const dirVec = DIRS[e.dirIndex];
 
-          const alignedRow = Math.abs(dy2) < 20 && Math.sign(dx2) === dirVec.vx;
-          const alignedCol = Math.abs(dx2) < 20 && Math.sign(dy2) === dirVec.vy;
+          const alignedRow = Math.abs(dy) < 20 && Math.sign(dx) === dirVec.vx;
+          const alignedCol = Math.abs(dx) < 20 && Math.sign(dy) === dirVec.vy;
 
-          if ((alignedRow || alignedCol) && distance(e.x, e.y, player.x, player.y) < 350) {
-            // simple line of sight: don't shoot if a wall is between
+          if ((alignedRow || alignedCol) && distance(e.x, e.y, player.x, player.y) < TILE * 8) {
+            // simple line-of-sight: sample along path and cancel if wall hit
             let clear = true;
-            for (let w = 0; w < walls.length; w++) {
-              const wall = walls[w];
-              const steps = 12;
-              for (let s = 1; s < steps; s++) {
-                const tx = e.x + (dx2 / steps) * s;
-                const ty = e.y + (dy2 / steps) * s;
-                if (tx >= wall.x && tx <= wall.x + wall.w && ty >= wall.y && ty <= wall.y + wall.h) {
-                  clear = false;
-                  break;
-                }
+            const steps = 10;
+            for (let s = 1; s < steps; s++) {
+              const tx = e.x + (dx / steps) * s;
+              const ty = e.y + (dy / steps) * s;
+              if (positionHitsWall(tx, ty, 3)) {
+                clear = false;
+                break;
               }
-              if (!clear) break;
             }
 
             if (clear) {
@@ -702,7 +767,17 @@
       }
     }
 
-    // ===== Drawing =====
+    function updateExplosions(dt) {
+      for (let i = explosions.length - 1; i >= 0; i--) {
+        const ex = explosions[i];
+        ex.age += dt;
+        if (ex.age > ex.duration) {
+          explosions.splice(i, 1);
+        }
+      }
+    }
+
+    // ====== Drawing ======
     function drawGrid() {
       ctx.strokeStyle = "#d5cfbf";
       ctx.lineWidth = 1;
@@ -754,6 +829,21 @@
         ctx.fillStyle = m.armed ? "#555" : "#999";
         ctx.arc(m.x, m.y, 6, 0, Math.PI * 2);
         ctx.fill();
+      }
+    }
+
+    function drawExplosions() {
+      for (let i = 0; i < explosions.length; i++) {
+        const ex = explosions[i];
+        const t = ex.age / ex.duration;
+        const radius = TILE * (1.2 + t * 1.0);
+        ctx.save();
+        ctx.globalAlpha = 0.3 * (1 - t);
+        ctx.fillStyle = "#444";
+        ctx.beginPath();
+        ctx.arc(ex.x, ex.y, radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
       }
     }
 
@@ -821,14 +911,15 @@
       drawEnemies();
       drawBullets();
       drawMines();
+      drawExplosions();
       drawPlayer();
       drawHUD();
     }
 
-    // ===== Game loop (≈6 fps logic) =====
+    // ====== Game loop ======
     let lastTime = 0;
     let accumulator = 0;
-    const STEP = 1 / 6;
+    const STEP = 1 / 6; // ~6 updates per second (e-ink friendly)
 
     function gameLoop(timestamp) {
       if (!lastTime) lastTime = timestamp;
@@ -846,8 +937,9 @@
       requestAnimationFrame(gameLoop);
     }
 
+    // ====== Start game ======
+    resizeCanvas();
     resetGame();
-    resizeCanvas(); 
     requestAnimationFrame(gameLoop);
   </script>
 </body>
