@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Kindle Space Invaders</title>
+  <title>Operation Inkwell – Infiltration</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <style>
     * {
@@ -79,7 +79,7 @@
       border: 1px solid #857d6a;
       background: #fdfbf6;
       color: #111;
-      font-size: 1.3rem;
+      font-size: 1.2rem;
       font-weight: 600;
       padding: 0.4rem 0.6rem;
       cursor: pointer;
@@ -88,7 +88,7 @@
 
     .ctrl-btn.wide {
       min-width: 6rem;
-      font-size: 1.1rem;
+      font-size: 1.05rem;
     }
 
     .ctrl-btn:active {
@@ -112,11 +112,16 @@
     <div id="touchControlsBar">
       <div id="touchControls">
         <div class="ctrl-row">
-          <button id="btnLeft" class="ctrl-btn">◀</button>
-          <button id="btnRight" class="ctrl-btn">▶</button>
-          <button id="btnFire" class="ctrl-btn wide">FIRE</button>
+          <button id="btnUp" class="ctrl-btn">▲</button>
         </div>
         <div class="ctrl-row">
+          <button id="btnLeft" class="ctrl-btn">◀</button>
+          <button id="btnWait" class="ctrl-btn wide">WAIT</button>
+          <button id="btnRight" class="ctrl-btn">▶</button>
+        </div>
+        <div class="ctrl-row">
+          <button id="btnAction" class="ctrl-btn wide">ACTION</button>
+          <button id="btnDown" class="ctrl-btn">▼</button>
           <button id="btnNew" class="ctrl-btn wide">NEW</button>
         </div>
       </div>
@@ -128,10 +133,9 @@
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
 
-    // Smaller grid to reduce redraw work
-    const GRID_COLS = 13;
-    const GRID_ROWS = 18;
-    let cellSize = 20;
+    const GRID_COLS = 15;
+    const GRID_ROWS = 15;
+    let cellSize = 24;
     let gridOffsetX = 0;
     let gridOffsetY = 0;
 
@@ -148,6 +152,7 @@
       const boardHeight = cellSize * GRID_ROWS;
       gridOffsetX = Math.floor((canvas.width - boardWidth) / 2);
       gridOffsetY = Math.floor((canvas.height - boardHeight) / 2);
+      // Don't call render() here; level setup may not be ready yet.
     }
 
     window.addEventListener("resize", resizeCanvas);
@@ -159,294 +164,533 @@
       };
     }
 
-    // ===== Game state =====
-    const keys = { left: false, right: false, fire: false };
+    // ===== Level definitions =====
+    // Legend:
+    // # = wall
+    // . = floor
+    // P = player start
+    // G = patrolling guard (horizontal)
+    // S = stationary guard
+    // R = rotating scanner
+    // B = barrel (explosive)
+    // C = crate (pushable, blocks vision)
+    // D = blast door (explosion only)
+    // K = intel crate (must collect all)
+    // X = extraction point
+    const LEVELS = [
+      [ // Level 1 – simple intro
+        "###############",
+        "#P..#....K...X#",
+        "#..##.###.##..#",
+        "#..B..#...#...#",
+        "#..##.#C..#...#",
+        "#.....#...#...#",
+        "###.#.###.###.#",
+        "#...#.......#.#",
+        "#..###.###.#..#",
+        "#..#.......#..#",
+        "#..#.C.B..##..#",
+        "#..#...#......#",
+        "#..###.#.##..##",
+        "#.............#",
+        "###############"
+      ],
+      [ // Level 2 – original map w/ intel
+        "###############",
+        "#P..#.....G..K#",
+        "#..##.###.##..#",
+        "#..B..#...#...#",
+        "#..##.#C..#K..#",
+        "#.....#...#...#",
+        "###.#.###.###.#",
+        "#K..#...C..#..#",
+        "#..###.###.#R.#",
+        "#..#.......#..#",
+        "#..#.C.B..D##X#",
+        "#..#...#......#",
+        "#..###.#.##..##",
+        "#......S......#",
+        "###############"
+      ],
+      [ // Level 3 – more intel & guards
+        "###############",
+        "#P..#..K....X.#",
+        "#..##.###.##..#",
+        "#..B..#...#..K#",
+        "#..##.#C..#...#",
+        "#.....#...#...#",
+        "###.#.###.###.#",
+        "#..K#...C..#..#",
+        "#..###.###.#R.#",
+        "#..#....G..#..#",
+        "#..#.C.B..D##.#",
+        "#..#...#...S..#",
+        "#..###.#.##..##",
+        "#......B......#",
+        "###############"
+      ]
+    ];
 
-    const player = {
-      col: Math.floor(GRID_COLS / 2),
-      row: GRID_ROWS - 2,
-      lives: 3,
-      alive: true
+    const TILE_WALL  = "#";
+    const TILE_FLOOR = ".";
+    const TILE_DOOR  = "D";
+    const TILE_EXIT  = "X";
+
+    let currentLevelIndex = 0;
+
+    // ===== Game state =====
+    let baseMap = [];
+    let player = {
+      col: 1,
+      row: 1,
+      dir: { x: 0, y: -1 },
+      alive: true,
+      won: false
     };
 
-    let playerBullet = null;      // at most 1 bullet at a time
-    let invaders = [];            // array of {col,row,alive}
+    let guards = [];
+    let barrels = [];
+    let crates = [];
     let explosions = [];
+    let intel = []; // {col,row,collected}
 
-    let score = 0;
-    let level = 1;
-    let gameOver = false;
+    let message = "";
+    let messageTimer = 0;
 
-    // Invader formation movement
-    let invDir = 1;               // 1 = right, -1 = left
-    let invStepTimer = 0;
-    let invStepInterval = 0.6;    // seconds between formation steps
+    const keys = {
+      up: false,
+      down: false,
+      left: false,
+      right: false,
+      wait: false,
+      action: false
+    };
 
-    let fireCooldown = 0;
+    // ===== Level loading =====
+    function resetLevel() {
+      const level = LEVELS[currentLevelIndex];
 
-    // ===== Input handling =====
-    document.addEventListener("keydown", (e) => {
-      let handled = false;
-      if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") {
-        keys.left = true; handled = true;
-      } else if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") {
-        keys.right = true; handled = true;
-      } else if (e.key === " " || e.key === "ArrowUp" || e.key === "w" || e.key === "W") {
-        keys.fire = true; handled = true;
-      } else if (e.key === "n" || e.key === "N") {
-        resetGame(); handled = true;
+      baseMap = [];
+      guards = [];
+      barrels = [];
+      crates = [];
+      explosions = [];
+      intel = [];
+      player.alive = true;
+      player.won = false;
+      message = "";
+      messageTimer = 0;
+
+      for (let r = 0; r < GRID_ROWS; r++) {
+        baseMap[r] = [];
+        const rowStr = level[r];
+        for (let c = 0; c < GRID_COLS; c++) {
+          const ch = rowStr[c];
+          let tile = TILE_FLOOR;
+
+          if (ch === "#") tile = TILE_WALL;
+          else if (ch === "D") tile = TILE_DOOR;
+          else if (ch === "X") tile = TILE_EXIT;
+
+          if (ch === "P") {
+            player.col = c;
+            player.row = r;
+            player.dir = { x: 0, y: -1 };
+          } else if (ch === "G") {
+            guards.push({ col: c, row: r, type: "patrol", dirX: 1, dirY: 0 });
+          } else if (ch === "S") {
+            guards.push({ col: c, row: r, type: "stationary", facing: { x: 0, y: -1 } });
+          } else if (ch === "R") {
+            guards.push({ col: c, row: r, type: "scanner", facingIndex: 0 });
+          } else if (ch === "B") {
+            barrels.push({ col: c, row: r });
+          } else if (ch === "C") {
+            crates.push({ col: c, row: r });
+          } else if (ch === "K") {
+            intel.push({ col: c, row: r, collected: false });
+          }
+
+          baseMap[r][c] = tile;
+        }
       }
-      if (handled) e.preventDefault();
-    });
 
-    document.addEventListener("keyup", (e) => {
-      let handled = false;
-      if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") {
-        keys.left = false; handled = true;
-      } else if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") {
-        keys.right = false; handled = true;
-      } else if (e.key === " " || e.key === "ArrowUp" || e.key === "w" || e.key === "W") {
-        keys.fire = false; handled = true;
-      }
-      if (handled) e.preventDefault();
-    });
-
-    function bindButton(btnId, keyName) {
-      const btn = document.getElementById(btnId);
-      if (!btn) return;
-
-      const down = (ev) => {
-        ev.preventDefault();
-        keys[keyName] = true;
-      };
-      const up = (ev) => {
-        ev.preventDefault();
-        keys[keyName] = false;
-      };
-
-      btn.addEventListener("touchstart", down, { passive: false });
-      btn.addEventListener("touchend", up, { passive: false });
-      btn.addEventListener("touchcancel", up, { passive: false });
-      btn.addEventListener("mousedown", down);
-      document.addEventListener("mouseup", () => { keys[keyName] = false; });
+      showMessage("Mission " + (currentLevelIndex + 1), 2);
     }
 
-    bindButton("btnLeft", "left");
-    bindButton("btnRight", "right");
-    bindButton("btnFire", "fire");
-    document.getElementById("btnNew").addEventListener("click", (e) => {
-      e.preventDefault();
-      resetGame();
-    });
-
-    // ===== Helper functions =====
-    function clamp(v, min, max) {
-      if (v < min) return min;
-      if (v > max) return max;
-      return v;
+    function nextLevel() {
+      currentLevelIndex = (currentLevelIndex + 1) % LEVELS.length;
+      resetLevel();
     }
 
-    function spawnExplosionAtGrid(col, row) {
+    // ===== Helpers =====
+    function inBounds(col, row) {
+      return col >= 0 && col < GRID_COLS && row >= 0 && row < GRID_ROWS;
+    }
+
+    function tileAt(col, row) {
+      if (!inBounds(col, row)) return TILE_WALL;
+      return baseMap[row][col];
+    }
+
+    function isWallLike(col, row) {
+      return tileAt(col, row) === TILE_WALL;
+    }
+
+    function guardAt(col, row) {
+      for (let i = 0; i < guards.length; i++) {
+        if (guards[i].col === col && guards[i].row === row) return guards[i];
+      }
+      return null;
+    }
+
+    function findBarrel(col, row) {
+      for (let i = 0; i < barrels.length; i++) {
+        const b = barrels[i];
+        if (b.col === col && b.row === row) return b;
+      }
+      return null;
+    }
+
+    function removeBarrel(b) {
+      const idx = barrels.indexOf(b);
+      if (idx >= 0) barrels.splice(idx, 1);
+    }
+
+    function findCrate(col, row) {
+      for (let i = 0; i < crates.length; i++) {
+        const c = crates[i];
+        if (c.col === col && c.row === row) return c;
+      }
+      return null;
+    }
+
+    function removeCrate(c) {
+      const idx = crates.indexOf(c);
+      if (idx >= 0) crates.splice(idx, 1);
+    }
+
+    function clearDoorAt(col, row) {
+      if (!inBounds(col, row)) return;
+      if (baseMap[row][col] === TILE_DOOR) baseMap[row][col] = TILE_FLOOR;
+    }
+
+    function isBlockedForPlayer(col, row) {
+      const t = tileAt(col, row);
+      if (t === TILE_WALL || t === TILE_DOOR) return true;
+      if (findCrate(col, row)) return true;
+      if (findBarrel(col, row)) return true;
+      if (guardAt(col, row)) return true;
+      return false;
+    }
+
+    function isBlockedForPush(col, row) {
+      const t = tileAt(col, row);
+      if (t === TILE_WALL || t === TILE_DOOR) return true;
+      if (findCrate(col, row)) return true;
+      if (findBarrel(col, row)) return true;
+      if (guardAt(col, row)) return true;
+      return false;
+    }
+
+    function showMessage(text, timeSec) {
+      message = text;
+      messageTimer = timeSec;
+    }
+
+    function allIntelCollected() {
+      if (intel.length === 0) return true;
+      return intel.every(i => i.collected);
+    }
+
+    function pickupIntelIfAny() {
+      for (let i = 0; i < intel.length; i++) {
+        const itm = intel[i];
+        if (!itm.collected && itm.col === player.col && itm.row === player.row) {
+          itm.collected = true;
+          const collected = intel.filter(k => k.collected).length;
+          showMessage("Intel " + collected + "/" + intel.length + " secured.", 2);
+        }
+      }
+    }
+
+    // ===== Turn system =====
+    function performTurn(action) {
+      if (!player.alive || player.won) return;
+
+      let moved = false;
+      if (action === "move") {
+        const dx = keys.right ? 1 : keys.left ? -1 : 0;
+        const dy = keys.down ? 1 : keys.up ? -1 : 0;
+        if (dx !== 0 || dy !== 0) {
+          player.dir = { x: dx, y: dy };
+          moved = tryMovePlayer(dx, dy);
+        }
+      } else if (action === "wait") {
+        moved = true;
+      } else if (action === "action") {
+        doPlayerAction();
+        moved = true;
+      }
+
+      keys.up = keys.down = keys.left = keys.right = false;
+      keys.wait = keys.action = false;
+      if (!moved) return;
+
+      pickupIntelIfAny();
+
+      stepGuards();
+      checkDetection();
+
+      if (!player.alive) return;
+      if (tileAt(player.col, player.row) === TILE_EXIT) {
+        if (allIntelCollected()) {
+          player.won = true;
+          if (currentLevelIndex === LEVELS.length - 1) {
+            showMessage("All missions complete!", 4);
+          } else {
+            showMessage("Mission complete! NEW → next.", 4);
+          }
+        } else {
+          showMessage("Collect all intel first!", 2.5);
+        }
+      }
+    }
+
+    function tryMovePlayer(dx, dy) {
+      if (dx === 0 && dy === 0) return false;
+      const targetCol = player.col + dx;
+      const targetRow = player.row + dy;
+      if (!inBounds(targetCol, targetRow)) return false;
+
+      const crate = findCrate(targetCol, targetRow);
+      const barrel = findBarrel(targetCol, targetRow);
+      if (crate || barrel) {
+        const pushCol = targetCol + dx;
+        const pushRow = targetRow + dy;
+        if (!inBounds(pushCol, pushRow)) return false;
+        if (isBlockedForPush(pushCol, pushRow)) return false;
+        if (crate) { crate.col = pushCol; crate.row = pushRow; }
+        else { barrel.col = pushCol; barrel.row = pushRow; }
+        player.col = targetCol;
+        player.row = targetRow;
+        return true;
+      }
+
+      if (isBlockedForPlayer(targetCol, targetRow)) return false;
+      player.col = targetCol;
+      player.row = targetRow;
+      return true;
+    }
+
+    function doPlayerAction() {
+      let detonated = false;
+      const dirs = [
+        { x: 1, y: 0 }, { x: -1, y: 0 },
+        { x: 0, y: 1 }, { x: 0, y: -1 }
+      ];
+      for (let i = 0; i < dirs.length; i++) {
+        const nx = player.col + dirs[i].x;
+        const ny = player.row + dirs[i].y;
+        const b = findBarrel(nx, ny);
+        if (b) {
+          createExplosionAt(nx, ny);
+          detonated = true;
+        }
+      }
+      if (!detonated) showMessage("No barrel next to you.", 1.5);
+    }
+
+    function createExplosionAt(col, row) {
       const p = gridToCenter(col, row);
-      explosions.push({
-        x: p.x,
-        y: p.y,
-        age: 0,
-        duration: 0.35
-      });
+      explosions.push({ x: p.x, y: p.y, age: 0, duration: 0.5, col, row });
+
+      for (let ry = row - 1; ry <= row + 1; ry++) {
+        for (let rx = col - 1; rx <= col + 1; rx++) {
+          if (!inBounds(rx, ry)) continue;
+          const b = findBarrel(rx, ry); if (b) removeBarrel(b);
+          const c = findCrate(rx, ry); if (c) removeCrate(c);
+          clearDoorAt(rx, ry);
+          const g = guardAt(rx, ry);
+          if (g) {
+            const idx = guards.indexOf(g);
+            if (idx >= 0) guards.splice(idx, 1);
+          }
+        }
+      }
     }
 
     function updateExplosions(dt) {
       for (let i = explosions.length - 1; i >= 0; i--) {
         explosions[i].age += dt;
-        if (explosions[i].age > explosions[i].duration) {
-          explosions.splice(i, 1);
+        if (explosions[i].age > explosions[i].duration) explosions.splice(i, 1);
+      }
+    }
+
+    function isBlockedForGuard(col, row) {
+      const t = tileAt(col, row);
+      if (t === TILE_WALL || t === TILE_DOOR) return true;
+      if (findCrate(col, row)) return true;
+      if (findBarrel(col, row)) return true;
+      return false;
+    }
+
+    function stepGuards() {
+      for (let i = 0; i < guards.length; i++) {
+        const g = guards[i];
+        if (g.type === "patrol") {
+          let nextCol = g.col + g.dirX;
+          if (!inBounds(nextCol, g.row) || isWallLike(nextCol, g.row) || isBlockedForGuard(nextCol, g.row)) {
+            g.dirX *= -1;
+            nextCol = g.col + g.dirX;
+          }
+          if (!isBlockedForGuard(nextCol, g.row)) g.col = nextCol;
+        } else if (g.type === "scanner") {
+          g.facingIndex = (g.facingIndex + 1) % 4;
+        }
+      }
+
+      for (let i = 0; i < guards.length; i++) {
+        const g = guards[i];
+        if (g.col === player.col && g.row === player.row) {
+          player.alive = false;
+          showMessage("You were caught!", 4);
+          return;
         }
       }
     }
 
-    // ===== Setup =====
-    function createInvaders() {
-      invaders = [];
-      const rows = 4;
-      const cols = 8;
-      const startRow = 2;
-      const marginLeft = 2;
-
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          const col = marginLeft + c;
-          const row = startRow + r;
-          invaders.push({ col, row, alive: true });
-        }
+    // ===== Detection & fields of view =====
+    function rayDetectsPlayer(startCol, startRow, dx, dy, maxDist) {
+      let col = startCol, row = startRow;
+      for (let step = 0; step < maxDist; step++) {
+        col += dx; row += dy;
+        if (!inBounds(col, row)) return false;
+        const t = tileAt(col, row);
+        if (t === TILE_WALL || t === TILE_DOOR) return false;
+        // crates and barrels also block vision now
+        if (findCrate(col, row) || findBarrel(col, row)) return false;
+        if (col === player.col && row === player.row) return true;
       }
-      invDir = 1;
-      invStepTimer = 0;
+      return false;
     }
 
-    function resetGame() {
-      player.col = Math.floor(GRID_COLS / 2);
-      player.row = GRID_ROWS - 2;
-      player.lives = 3;
-      player.alive = true;
-
-      score = 0;
-      level = 1;
-      gameOver = false;
-
-      playerBullet = null;
-      explosions = [];
-      createInvaders();
-      invStepInterval = 0.6;   // reset speed
-      fireCooldown = 0;
-    }
-
-    function nextLevel() {
-      level++;
-      createInvaders();
-      // Speed up a bit each level, but keep a floor
-      invStepInterval = Math.max(0.18, 0.6 - (level - 1) * 0.05);
-    }
-
-    // ===== Updates =====
-    function update(dt) {
-      if (gameOver) return;
+    function checkDetection() {
       if (!player.alive) return;
-
-      // Player horizontal movement: step-based to reduce smear
-      if (keys.left) {
-        player.col = clamp(player.col - 1, 0, GRID_COLS - 1);
-        keys.left = false;
-      } else if (keys.right) {
-        player.col = clamp(player.col + 1, 0, GRID_COLS - 1);
-        keys.right = false;
-      }
-
-      // Shooting
-      fireCooldown -= dt;
-      if (fireCooldown < 0) fireCooldown = 0;
-      if (keys.fire && fireCooldown === 0 && !playerBullet) {
-        spawnPlayerBullet();
-        fireCooldown = 0.3;
-      }
-
-      // Bullet update
-      updatePlayerBullet(dt);
-
-      // Invader formation step
-      invStepTimer += dt;
-      if (invStepTimer >= invStepInterval) {
-        invStepTimer -= invStepInterval;
-        stepInvaders();
-      }
-
-      // Explosions
-      updateExplosions(dt);
-    }
-
-    function spawnPlayerBullet() {
-      const p = gridToCenter(player.col, player.row);
-      playerBullet = {
-        x: p.x,
-        y: p.y - cellSize * 0.5,
-        vy: -300
-      };
-    }
-
-    function updatePlayerBullet(dt) {
-      if (!playerBullet) return;
-      playerBullet.y += playerBullet.vy * dt;
-
-      // off-screen
-      if (playerBullet.y < gridOffsetY - 10) {
-        playerBullet = null;
-        return;
-      }
-
-      // Check collision with invaders (grid-based)
-      const col = Math.floor((playerBullet.x - gridOffsetX) / cellSize);
-      const row = Math.floor((playerBullet.y - gridOffsetY) / cellSize);
-
-      for (let i = 0; i < invaders.length; i++) {
-        const inv = invaders[i];
-        if (!inv.alive) continue;
-        if (inv.col === col && inv.row === row) {
-          inv.alive = false;
-          spawnExplosionAtGrid(inv.col, inv.row);
-          score += 10;
-          playerBullet = null;
-          break;
-        }
-      }
-
-      // If all invaders dead -> next level
-      if (invaders.every(inv => !inv.alive)) {
-        nextLevel();
-      }
-    }
-
-    function stepInvaders() {
-      if (invaders.length === 0) return;
-
-      // Determine bounds of alive invaders
-      let minCol = Infinity;
-      let maxCol = -Infinity;
-      let maxRow = -Infinity;
-
-      for (let i = 0; i < invaders.length; i++) {
-        const inv = invaders[i];
-        if (!inv.alive) continue;
-        if (inv.col < minCol) minCol = inv.col;
-        if (inv.col > maxCol) maxCol = inv.col;
-        if (inv.row > maxRow) maxRow = inv.row;
-      }
-
-      if (minCol === Infinity) return; // none alive
-
-      // Edge check: if formation would go off screen, move down instead & reverse dir
-      const atLeftEdge = (invDir === -1 && minCol <= 0);
-      const atRightEdge = (invDir === 1 && maxCol >= GRID_COLS - 1);
-
-      if (atLeftEdge || atRightEdge) {
-        // Move down one row
-        for (let i = 0; i < invaders.length; i++) {
-          const inv = invaders[i];
-          if (!inv.alive) continue;
-          inv.row += 1;
-        }
-        invDir *= -1;
-      } else {
-        // Move horizontally
-        for (let i = 0; i < invaders.length; i++) {
-          const inv = invaders[i];
-          if (!inv.alive) continue;
-          inv.col += invDir;
-        }
-      }
-
-      // Check for loss: if any alive invader reaches the player row or below
-      for (let i = 0; i < invaders.length; i++) {
-        const inv = invaders[i];
-        if (!inv.alive) continue;
-        if (inv.row >= player.row) {
-          playerHit();
-          break;
+      for (let i = 0; i < guards.length; i++) {
+        const g = guards[i];
+        if (g.type === "patrol") {
+          if (rayDetectsPlayer(g.col, g.row, g.dirX, 0, 4)) {
+            player.alive = false;
+            showMessage("Spotted by patrol!", 4);
+            return;
+          }
+        } else if (g.type === "stationary") {
+          const fx = g.facing.x, fy = g.facing.y;
+          if (rayDetectsPlayer(g.col, g.row, fx, fy, 5)) {
+            player.alive = false;
+            showMessage("Guard spotted you!", 4);
+            return;
+          }
+        } else if (g.type === "scanner") {
+          const dirs = [
+            { x: 0, y: -1 }, { x: 1, y: 0 },
+            { x: 0, y: 1 },  { x: -1, y: 0 }
+          ];
+          const d = dirs[g.facingIndex];
+          if (rayDetectsPlayer(g.col, g.row, d.x, d.y, 6)) {
+            player.alive = false;
+            showMessage("Scanner alarm!", 4);
+            return;
+          }
         }
       }
     }
 
-    function playerHit() {
-      if (!player.alive) return;
-      player.lives--;
-      if (player.lives <= 0) {
-        player.alive = false;
-        gameOver = true;
-      } else {
-        // reset player position
-        player.col = Math.floor(GRID_COLS / 2);
-        player.row = GRID_ROWS - 2;
+    // For drawing FOV strips
+    function drawGuardFOV() {
+      ctx.save();
+      ctx.globalAlpha = 0.18;
+      ctx.fillStyle = "#777";
+
+      for (let i = 0; i < guards.length; i++) {
+        const g = guards[i];
+        let dx = 0, dy = 0, maxDist = 0;
+
+        if (g.type === "patrol") {
+          dx = g.dirX; dy = 0; maxDist = 4;
+        } else if (g.type === "stationary") {
+          dx = g.facing.x; dy = g.facing.y; maxDist = 5;
+        } else if (g.type === "scanner") {
+          const dirs = [
+            { x: 0, y: -1 }, { x: 1, y: 0 },
+            { x: 0, y: 1 },  { x: -1, y: 0 }
+          ];
+          const d = dirs[g.facingIndex];
+          dx = d.x; dy = d.y; maxDist = 6;
+        } else {
+          continue;
+        }
+
+        let col = g.col;
+        let row = g.row;
+        for (let step = 0; step < maxDist; step++) {
+          col += dx;
+          row += dy;
+          if (!inBounds(col, row)) break;
+          const t = tileAt(col, row);
+          if (t === TILE_WALL || t === TILE_DOOR) break;
+          if (findCrate(col, row) || findBarrel(col, row)) break;
+
+          const x = gridOffsetX + col * cellSize;
+          const y = gridOffsetY + row * cellSize;
+          ctx.fillRect(x, y, cellSize, cellSize);
+        }
       }
+
+      ctx.restore();
     }
+
+    // ===== Input handling =====
+    document.addEventListener("keydown", (e) => {
+      let handled = false;
+      if (e.key === "ArrowUp" || e.key === "w" || e.key === "W") {
+        keys.up = true; handled = true; performTurn("move");
+      } else if (e.key === "ArrowDown" || e.key === "s" || e.key === "S") {
+        keys.down = true; handled = true; performTurn("move");
+      } else if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") {
+        keys.left = true; handled = true; performTurn("move");
+      } else if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") {
+        keys.right = true; handled = true; performTurn("move");
+      } else if (e.key === " ") {
+        keys.action = true; handled = true; performTurn("action");
+      } else if (e.key === "Enter") {
+        keys.wait = true; handled = true; performTurn("wait");
+      } else if (e.key === "n" || e.key === "N") {
+        handled = true;
+        if (player.won) nextLevel();
+        else resetLevel();
+      }
+      if (handled) e.preventDefault();
+    });
+
+    function bindTouchButton(id, handler) {
+      const btn = document.getElementById(id);
+      if (!btn) return;
+      const down = (ev) => { ev.preventDefault(); handler(); };
+      btn.addEventListener("touchstart", down, { passive: false });
+      btn.addEventListener("mousedown", down);
+    }
+
+    bindTouchButton("btnUp",   () => { keys.up = true; performTurn("move"); });
+    bindTouchButton("btnDown", () => { keys.down = true; performTurn("move"); });
+    bindTouchButton("btnLeft", () => { keys.left = true; performTurn("move"); });
+    bindTouchButton("btnRight",() => { keys.right = true; performTurn("move"); });
+    bindTouchButton("btnWait", () => { keys.wait = true; performTurn("wait"); });
+    bindTouchButton("btnAction", () => { keys.action = true; performTurn("action"); });
+    bindTouchButton("btnNew", () => {
+      if (player.won) nextLevel();
+      else resetLevel();
+    });
 
     // ===== Rendering =====
     function drawGrid() {
@@ -466,31 +710,88 @@
       ctx.stroke();
     }
 
-    function drawHUD() {
-      ctx.fillStyle = "#111";
-      ctx.font = "14px system-ui, sans-serif";
-      ctx.textBaseline = "top";
-      const text = "Score: " + score +
-                   "   Level: " + level +
-                   "   Lives: " + player.lives;
-      ctx.fillText(text, 10, 8);
-
-      if (gameOver) {
-        const msg = "Game over – NEW or N to restart";
-        ctx.font = "16px system-ui, sans-serif";
-        const w = ctx.measureText(msg).width;
-        ctx.fillText(msg, (canvas.width - w) / 2, 28);
+    function drawTiles() {
+      for (let r = 0; r < GRID_ROWS; r++) {
+        for (let c = 0; c < GRID_COLS; c++) {
+          const t = baseMap[r][c];
+          const x = gridOffsetX + c * cellSize;
+          const y = gridOffsetY + r * cellSize;
+          if (t === TILE_WALL) {
+            ctx.fillStyle = "#c2b59a";
+            ctx.fillRect(x, y, cellSize, cellSize);
+          } else if (t === TILE_DOOR) {
+            ctx.fillStyle = "#b89b7c";
+            ctx.fillRect(x + 2, y + 2, cellSize - 4, cellSize - 4);
+          } else if (t === TILE_EXIT) {
+            ctx.fillStyle = "#d6e2d2";
+            ctx.fillRect(x + 2, y + 2, cellSize - 4, cellSize - 4);
+            ctx.strokeStyle = "#3c5f3c";
+            ctx.strokeRect(x + 2, y + 2, cellSize - 4, cellSize - 4);
+          }
+        }
       }
     }
 
-    function drawInvaders() {
+    function drawCrates() {
       ctx.lineWidth = 1.5;
-      for (let i = 0; i < invaders.length; i++) {
-        const inv = invaders[i];
-        if (!inv.alive) continue;
-        const p = gridToCenter(inv.col, inv.row);
+      for (let i = 0; i < crates.length; i++) {
+        const c = crates[i];
+        const p = gridToCenter(c.col, c.row);
+        const s = cellSize * 0.7;
+        ctx.fillStyle = "#8b6f4f";
+        ctx.strokeStyle = "#4f3823";
+        ctx.beginPath();
+        ctx.rect(p.x - s / 2, p.y - s / 2, s, s);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
+    function drawBarrels() {
+      ctx.lineWidth = 1.5;
+      for (let i = 0; i < barrels.length; i++) {
+        const b = barrels[i];
+        const p = gridToCenter(b.col, b.row);
+        const r = cellSize * 0.33;
+        ctx.beginPath();
+        ctx.fillStyle = "#555";
+        ctx.strokeStyle = "#222";
+        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
+    function drawIntel() {
+      ctx.lineWidth = 1.3;
+      for (let i = 0; i < intel.length; i++) {
+        const itm = intel[i];
+        if (itm.collected) continue;
+        const p = gridToCenter(itm.col, itm.row);
+        const s = cellSize * 0.55;
+        ctx.fillStyle = "#f7f0d0";
+        ctx.strokeStyle = "#7b6a3f";
+        ctx.beginPath();
+        ctx.rect(p.x - s / 2, p.y - s / 2, s, s);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(p.x - s * 0.25, p.y);
+        ctx.lineTo(p.x + s * 0.25, p.y);
+        ctx.moveTo(p.x, p.y - s * 0.25);
+        ctx.lineTo(p.x, p.y + s * 0.25);
+        ctx.stroke();
+      }
+    }
+
+    function drawGuards() {
+      ctx.lineWidth = 1.2;
+      for (let i = 0; i < guards.length; i++) {
+        const g = guards[i];
+        const p = gridToCenter(g.col, g.row);
         const w = cellSize * 0.7;
-        const h = cellSize * 0.45;
+        const h = cellSize * 0.7;
         ctx.fillStyle = "#333";
         ctx.strokeStyle = "#111";
         ctx.beginPath();
@@ -498,50 +799,51 @@
         ctx.fill();
         ctx.stroke();
 
-        // Simple "eyes"
-        const eyeR = cellSize * 0.1;
         ctx.beginPath();
-        ctx.fillStyle = "#eee";
-        ctx.arc(p.x - w * 0.2, p.y - h * 0.1, eyeR, 0, Math.PI * 2);
-        ctx.arc(p.x + w * 0.2, p.y - h * 0.1, eyeR, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.strokeStyle = "#eee";
+        ctx.moveTo(p.x - w * 0.3, p.y);
+        ctx.lineTo(p.x + w * 0.3, p.y);
+        ctx.stroke();
       }
     }
 
     function drawPlayer() {
-      if (!player.alive) return;
+      if (!player.alive && !player.won) return;
       const p = gridToCenter(player.col, player.row);
-      const w = cellSize * 0.7;
-      const h = cellSize * 0.35;
-      ctx.fillStyle = "#264653";
+      const size = cellSize * 0.7;
+      ctx.fillStyle = player.won ? "#3d7a3d" : "#264653";
       ctx.strokeStyle = "#11202a";
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.rect(p.x - w / 2, p.y - h / 2, w, h);
+      if (player.dir.y === -1) {
+        ctx.moveTo(p.x, p.y - size / 2);
+        ctx.lineTo(p.x - size / 2, p.y + size / 2);
+        ctx.lineTo(p.x + size / 2, p.y + size / 2);
+      } else if (player.dir.y === 1) {
+        ctx.moveTo(p.x, p.y + size / 2);
+        ctx.lineTo(p.x - size / 2, p.y - size / 2);
+        ctx.lineTo(p.x + size / 2, p.y - size / 2);
+      } else if (player.dir.x === -1) {
+        ctx.moveTo(p.x - size / 2, p.y);
+        ctx.lineTo(p.x + size / 2, p.y - size / 2);
+        ctx.lineTo(p.x + size / 2, p.y + size / 2);
+      } else {
+        ctx.moveTo(p.x + size / 2, p.y);
+        ctx.lineTo(p.x - size / 2, p.y - size / 2);
+        ctx.lineTo(p.x - size / 2, p.y + size / 2);
+      }
+      ctx.closePath();
       ctx.fill();
       ctx.stroke();
-
-      // turret
-      ctx.beginPath();
-      ctx.rect(p.x - cellSize * 0.05, p.y - h / 2 - cellSize * 0.25, cellSize * 0.1, cellSize * 0.25);
-      ctx.fill();
-    }
-
-    function drawPlayerBullet() {
-      if (!playerBullet) return;
-      ctx.fillStyle = "#111";
-      ctx.beginPath();
-      ctx.arc(playerBullet.x, playerBullet.y, 3, 0, Math.PI * 2);
-      ctx.fill();
     }
 
     function drawExplosions() {
       for (let i = 0; i < explosions.length; i++) {
         const ex = explosions[i];
         const t = ex.age / ex.duration;
-        const radius = cellSize * (0.8 + t * 1.1);
+        const radius = cellSize * (0.8 + t);
         ctx.save();
-        ctx.globalAlpha = 0.3 * (1 - t);
+        ctx.globalAlpha = 0.35 * (1 - t);
         ctx.fillStyle = "#444";
         ctx.beginPath();
         ctx.arc(ex.x, ex.y, radius, 0, Math.PI * 2);
@@ -550,12 +852,51 @@
       }
     }
 
+    function drawHUD() {
+      ctx.fillStyle = "#111";
+      ctx.font = "13px system-ui, sans-serif";
+      ctx.textBaseline = "top";
+      const lines = [
+        "Triangle = you. Intel = small square+cross.",
+        "Crates/barrels block vision. ACTION = explode barrel.",
+        "Get all intel then exit. NEW: restart / next mission."
+      ];
+      let y = 6;
+      for (let i = 0; i < lines.length; i++) {
+        ctx.fillText(lines[i], 10, y);
+        y += 14;
+      }
+
+      if (messageTimer > 0 && message) {
+        ctx.save();
+        ctx.globalAlpha = 0.9;
+        ctx.fillStyle = "#fdfbf6";
+        const padding = 8;
+        ctx.font = "15px system-ui, sans-serif";
+        const w = ctx.measureText(message).width + padding * 2;
+        const x = (canvas.width - w) / 2;
+        const h = 30;
+        const y2 = canvas.height * 0.12;
+        ctx.fillRect(x, y2, w, h);
+        ctx.strokeStyle = "#857d6a";
+        ctx.strokeRect(x, y2, w, h);
+        ctx.fillStyle = "#111";
+        ctx.textBaseline = "middle";
+        ctx.fillText(message, x + padding, y2 + h / 2);
+        ctx.restore();
+      }
+    }
+
     function render() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawTiles();
       drawGrid();
-      drawInvaders();
+      drawIntel();
+      drawCrates();
+      drawBarrels();
+      drawGuardFOV();
+      drawGuards();
       drawPlayer();
-      drawPlayerBullet();
       drawExplosions();
       drawHUD();
     }
@@ -565,17 +906,24 @@
     function gameLoop(timestamp) {
       if (!lastTime) lastTime = timestamp;
       let dt = (timestamp - lastTime) / 1000;
-      if (dt > 0.25) dt = 0.25; // clamp big jumps
+      if (dt > 0.25) dt = 0.25;
       lastTime = timestamp;
 
-      update(dt);
+      updateExplosions(dt);
+      if (messageTimer > 0) {
+        messageTimer -= dt;
+        if (messageTimer <= 0) {
+          messageTimer = 0;
+          message = "";
+        }
+      }
       render();
       requestAnimationFrame(gameLoop);
     }
 
     // ===== Init =====
     resizeCanvas();
-    resetGame();
+    resetLevel();
     requestAnimationFrame(gameLoop);
   </script>
 </body>
