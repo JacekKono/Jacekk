@@ -20,7 +20,7 @@
 <body class="min-h-screen flex flex-col items-center justify-center p-4 md:p-8">
 
     <!-- =================================================================== -->
-    <!-- STAGE 1: ONBOARDING & PREFERENCE SELECTION FORM (Plain Form Style)  -->
+    <!-- STAGE 1: ONBOARDING & PREFERENCE SELECTION FORM                      -->
     <!-- =================================================================== -->
     <div id="stage-onboarding" class="w-full max-w-xl bg-white border border-gray-200 rounded-2xl p-6 md:p-8 shadow-sm my-auto space-y-6">
         <div class="border-b border-gray-100 pb-4">
@@ -115,7 +115,7 @@
         </button>
     </div>
 
-    <!-- B. AUDITORY MODALITY -->
+    <!-- B. AUDITORY MODALITY (Using your Audio BTL.mp3) -->
     <div id="modality-audio" class="hidden w-full max-w-md bg-white border border-gray-200 rounded-2xl p-6 md:p-8 shadow-sm my-auto text-center space-y-6">
         <div>
             <span class="text-xs font-mono uppercase tracking-widest text-indigo-600 font-bold">Auditory Treatment</span>
@@ -123,7 +123,7 @@
             <p class="text-gray-500 text-xs mt-1">Play, pause, or adjust speed. Rewinding and skipping are disabled.</p>
         </div>
         <div class="p-6 rounded-xl bg-gray-50 border border-gray-200 flex flex-col items-center gap-4">
-            <audio id="study-audio" src="https://www.w3schools.com/html/horse.mp3" controls controlsList="nodownload noplaybackrate" class="w-full accent-indigo-600"></audio>
+            <audio id="study-audio" src="Audio BTL.mp3" controls controlsList="nodownload noplaybackrate" class="w-full accent-indigo-600"></audio>
             <div class="flex items-center gap-3 text-xs text-gray-600">
                 <label>Playback Speed:</label>
                 <button onclick="setAudioSpeed(1)" class="px-2.5 py-1 rounded bg-white border border-gray-300 font-semibold">1x</button>
@@ -136,7 +136,7 @@
         </button>
     </div>
 
-    <!-- C. VISUAL MODALITY -->
+    <!-- C. VISUAL MODALITY (Using your Video BTL.mp4) -->
     <div id="modality-visual" class="hidden w-full max-w-lg bg-white border border-gray-200 rounded-2xl p-6 md:p-8 shadow-sm my-auto text-center space-y-5">
         <div>
             <span class="text-xs font-mono uppercase tracking-widest text-indigo-600 font-bold">Visual Treatment</span>
@@ -144,20 +144,18 @@
             <p class="text-gray-500 text-xs mt-1">Play or pause the video. Rewinding and skipping are disabled.</p>
         </div>
         <div class="relative rounded-xl overflow-hidden border border-gray-200 bg-gray-950">
-            <video id="study-video" src="https://www.w3schools.com/html/mov_bbb.mp4" controls controlsList="nodownload noplaybackrate" class="w-full aspect-[16/9] object-cover"></video>
+            <video id="study-video" src="Video BTL.mp4" controls controlsList="nodownload noplaybackrate" class="w-full aspect-[16/9] object-cover"></video>
         </div>
         <button id="video-finish-btn" onclick="finishModalityContent()" disabled class="w-full py-3 bg-gray-100 text-gray-400 font-semibold rounded-lg transition uppercase tracking-wider text-xs cursor-not-allowed">
             Complete Video Viewing
         </button>
     </div>
 
-    <!-- D. KINESTHETIC MODALITY (Interactive Game container placeholder) -->
-    <div id="modality-game" class="hidden absolute inset-0 bg-stone-950 z-40 flex items-center justify-center overflow-hidden">
-        <!-- Game canvas integration handled in script -->
-    </div>
+    <!-- D. KINESTHETIC MODALITY -->
+    <div id="modality-game" class="hidden absolute inset-0 bg-stone-950 z-40 flex items-center justify-center overflow-hidden"></div>
 
     <!-- =================================================================== -->
-    <!-- STAGE 3: RETENTION QUIZ & POST-SURVEY (Separate Quiz Screens)       -->
+    <!-- STAGE 3: RETENTION QUIZ & POST-SURVEY                               -->
     <!-- =================================================================== -->
     <div id="stage-quiz" class="hidden w-full max-w-2xl bg-white border border-gray-200 rounded-2xl p-6 md:p-8 shadow-sm my-auto space-y-6">
         <div class="border-b border-gray-100 pb-4 flex items-center justify-between">
@@ -173,28 +171,24 @@
         </div>
 
         <form id="retention-form" onsubmit="submitRetentionQuiz(event)" class="space-y-5 text-sm">
-            <!-- T/F 1 -->
             <div class="p-4 rounded-xl bg-gray-50 border border-gray-200 space-y-2">
                 <p class="font-semibold text-gray-900">1. T/F The man from the country attempts to force his way through the gateway despite the gatekeepers' warnings.</p>
                 <label class="flex items-center gap-3 cursor-pointer"><input type="radio" name="tf1" value="True" required class="accent-indigo-600"> True</label>
                 <label class="flex items-center gap-3 cursor-pointer"><input type="radio" name="tf1" value="False" required class="accent-indigo-600"> False</label>
             </div>
 
-            <!-- T/F 2 -->
             <div class="p-4 rounded-xl bg-gray-50 border border-gray-200 space-y-2">
                 <p class="font-semibold text-gray-900">2. T/F The gatekeeper refuses to take any of the bribes the country man offers.</p>
                 <label class="flex items-center gap-3 cursor-pointer"><input type="radio" name="tf2" value="True" required class="accent-indigo-600"> True</label>
                 <label class="flex items-center gap-3 cursor-pointer"><input type="radio" name="tf2" value="False" required class="accent-indigo-600"> False</label>
             </div>
 
-            <!-- T/F 3 -->
             <div class="p-4 rounded-xl bg-gray-50 border border-gray-200 space-y-2">
                 <p class="font-semibold text-gray-900">3. T/F Over the years, the man from the country gets to know the gatekeeper.</p>
                 <label class="flex items-center gap-3 cursor-pointer"><input type="radio" name="tf3" value="True" required class="accent-indigo-600"> True</label>
                 <label class="flex items-center gap-3 cursor-pointer"><input type="radio" name="tf3" value="False" required class="accent-indigo-600"> False</label>
             </div>
 
-            <!-- Multiple Choice 1 -->
             <div class="p-4 rounded-xl bg-gray-50 border border-gray-200 space-y-2">
                 <p class="font-semibold text-gray-900">4. What is "The Law"?</p>
                 <label class="flex items-center gap-3 cursor-pointer"><input type="radio" name="mc1" value="1" required class="accent-indigo-600"> A large city renowned for wealth and prosperity.</label>
@@ -203,7 +197,6 @@
                 <label class="flex items-center gap-3 cursor-pointer"><input type="radio" name="mc1" value="4" required class="accent-indigo-600"> The text does not explicitly say.</label>
             </div>
 
-            <!-- Multiple Choice 2 -->
             <div class="p-4 rounded-xl bg-gray-50 border border-gray-200 space-y-2">
                 <p class="font-semibold text-gray-900">5. Who does the man from the country ask to help him persuade the gatekeeper?</p>
                 <label class="flex items-center gap-3 cursor-pointer"><input type="radio" name="mc2" value="1" required class="accent-indigo-600"> The other travelers who are allowed passage after short waits.</label>
@@ -212,7 +205,6 @@
                 <label class="flex items-center gap-3 cursor-pointer"><input type="radio" name="mc2" value="4" required class="accent-indigo-600"> The rock resembling a man’s face.</label>
             </div>
 
-            <!-- Multiple Choice 3 -->
             <div class="p-4 rounded-xl bg-gray-50 border border-gray-200 space-y-2">
                 <p class="font-semibold text-gray-900">6. What does the gatekeeper reveal at the end of the story?</p>
                 <label class="flex items-center gap-3 cursor-pointer"><input type="radio" name="mc3" value="1" required class="accent-indigo-600"> The country man was always allowed to pass through.</label>
@@ -221,7 +213,6 @@
                 <label class="flex items-center gap-3 cursor-pointer"><input type="radio" name="mc3" value="4" required class="accent-indigo-600"> The country man was finally free to pass through.</label>
             </div>
 
-            <!-- Multiple Choice 4 -->
             <div class="p-4 rounded-xl bg-gray-50 border border-gray-200 space-y-2">
                 <p class="font-semibold text-gray-900">7. Near the very end of the story, what prevents the man from passing through?</p>
                 <label class="flex items-center gap-3 cursor-pointer"><input type="radio" name="mc4" value="1" required class="accent-indigo-600"> Fear of what’s on the other side.</label>
@@ -230,7 +221,7 @@
                 <label class="flex items-center gap-3 cursor-pointer"><input type="radio" name="mc4" value="4" required class="accent-indigo-600"> The text does not explicitly say.</label>
             </div>
 
-            <!-- WRITTEN RESPONSE QUESTIONS (PLACED LAST) -->
+            <!-- Written Responses Last -->
             <div class="p-4 rounded-xl bg-gray-50 border border-gray-200 space-y-3">
                 <p class="font-semibold text-indigo-900">Written Responses (Required):</p>
                 <div>
@@ -250,7 +241,7 @@
     </div>
 
     <!-- =================================================================== -->
-    <!-- STAGE 3B: SEPARATE FINAL SURVEY SCREEN (Read Before / Helped)        -->
+    <!-- STAGE 3B: SEPARATE FINAL SURVEY SCREEN                              -->
     <!-- =================================================================== -->
     <div id="stage-post-survey" class="hidden w-full max-w-xl bg-white border border-gray-200 rounded-2xl p-6 md:p-8 shadow-sm my-auto space-y-6">
         <div class="border-b border-gray-100 pb-4">
@@ -292,7 +283,10 @@
         <p class="text-gray-600 text-sm leading-relaxed">
             Your responses, learning style preferences, assigned modality, and quiz answers have been successfully recorded.
         </p>
-        <div class="p-3 rounded-xl bg-gray-50 border border-gray-200 text-xs font-mono text-gray-500">
+        <div class="p-4 rounded-xl bg-gray-50 border border-gray-200 text-xs font-mono text-gray-700 text-left space-y-1" id="assigned-tracking-summary">
+            <!-- Dynamically populated preference tracking info -->
+        </div>
+        <div class="p-2 rounded-lg bg-gray-50 border border-gray-200 text-xs font-mono text-gray-500">
             Data saved securely.
         </div>
     </div>
@@ -367,12 +361,10 @@
                 document.getElementById('modality-visual').classList.remove('hidden');
                 setupVideoControls();
             } else if (type === 'Kinesthetic') {
-                // Instantly finish game modality for plain web flow or initialize simulation
                 finishModalityContent();
             }
         }
 
-        // --- READING TIMER LOGIC (4 minutes) ---
         let readingSecondsLeft = 240;
         let readingInterval = null;
         function startReadingTimer() {
@@ -459,7 +451,7 @@
             studyData.responses.tf3 = document.querySelector('input[name="tf3"]:checked')?.value || 'N/A';
             studyData.responses.mc1 = document.querySelector('input[name="mc1"]:checked')?.value || 'N/A';
             studyData.responses.mc2 = document.querySelector('input[name="mc2"]:checked')?.value || 'N/A';
-            studyData.responses.mc3 = document.querySelector('input[name="mc3"]:checked')?.value || 'N/A';
+            studyData.responses.mc3 = document.querySelector('input[name="mc3"]:checked')?.value || 'N/px' || document.querySelector('input[name="mc3"]:checked')?.value || 'N/A';
             studyData.responses.mc4 = document.querySelector('input[name="mc4"]:checked')?.value || 'N/A';
             studyData.responses.writtenBeyondGate = document.getElementById('written-q1')?.value.trim() || '';
             studyData.responses.writtenCharacteristic = document.getElementById('written-q2')?.value.trim() || '';
@@ -476,12 +468,20 @@
             localStorage.setItem(SESSION_LOCK_KEY, 'true');
             sendDataToServer(studyData);
 
+            // Populate summary on Thank You screen
+            document.getElementById('assigned-tracking-summary').innerHTML = `
+                <div><strong>Most Preferred:</strong> ${studyData.mostPreferred}</div>
+                <div><strong>Least Preferred:</strong> ${studyData.leastPreferred}</div>
+                <div><strong>Assigned Group:</strong> <span class="text-indigo-600 font-bold">${studyData.assignedModality.replace('_', ' ').toUpperCase()}</span></div>
+                <div><strong>Modality Studied:</strong> ${studyData.modalityType}</div>
+            `;
+
             document.getElementById('stage-post-survey').classList.add('hidden');
             document.getElementById('stage-thanks').classList.remove('hidden');
         }
 
         function sendDataToServer(data) {
-            const endpointUrl = "https://script.google.com/macros/s/AKfycbyiFjOrMxwNQj_Ozn8KIzQV3Tg1YWzUL7nTJBSIvAwzKs6cpQLQH-MZCDBzxDS3LSQTxA/exec";
+            const endpointUrl = "https://script.google.com/macros/s/YOUR_APPS_SCRIPT_WEB_APP_URL/exec";
             fetch(endpointUrl, {
                 method: 'POST',
                 mode: 'no-cors',
