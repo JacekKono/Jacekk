@@ -638,7 +638,7 @@
             studyData.leastPreferred = least;
             studyData.timestamp = new Date().toISOString();
 
-            const assignLeast = Math.random() < 0.5;
+            const assignLeast = false;
             studyData.assignedModality = assignLeast ? 'least_preferred' : 'most_preferred';
             studyData.modalityType = assignLeast ? least : most;
 
