@@ -187,13 +187,17 @@
             <p class="text-gray-500 text-xs mt-1">Play, pause, or adjust speed. Rewinding and skipping are disabled.</p>
         </div>
         <div class="p-6 rounded-xl bg-gray-50 border border-gray-200 flex flex-col items-center gap-4">
-            <audio id="study-audio" src="Audio BTL.mp3" controls controlsList="nodownload noplaybackrate" class="w-full accent-indigo-600"></audio>
+            <audio id="study-audio" preload="metadata" controls controlsList="nodownload noplaybackrate" class="w-full accent-indigo-600">
+                <source src="Audio%20BTL.mp3" type="audio/mpeg">
+                <source src="Audio BTL.mp3" type="audio/mpeg">
+            </audio>
             <div class="flex items-center gap-3 text-xs text-gray-600">
                 <label>Playback Speed:</label>
-                <button onclick="setAudioSpeed(1)" class="px-2.5 py-1 rounded bg-white border border-gray-300 font-semibold">1x</button>
-                <button onclick="setAudioSpeed(1.25)" class="px-2.5 py-1 rounded bg-white border border-gray-300 font-semibold">1.25x</button>
-                <button onclick="setAudioSpeed(1.5)" class="px-2.5 py-1 rounded bg-white border border-gray-300 font-semibold">1.5x</button>
+                <button type="button" onclick="setAudioSpeed(1)" class="px-2.5 py-1 rounded bg-white border border-gray-300 font-semibold cursor-pointer">1x</button>
+                <button type="button" onclick="setAudioSpeed(1.25)" class="px-2.5 py-1 rounded bg-white border border-gray-300 font-semibold cursor-pointer">1.25x</button>
+                <button type="button" onclick="setAudioSpeed(1.5)" class="px-2.5 py-1 rounded bg-white border border-gray-300 font-semibold cursor-pointer">1.5x</button>
             </div>
+            <p id="audio-status-msg" class="text-[11px] text-gray-400">Press play above to begin listening.</p>
         </div>
         <button id="audio-finish-btn" onclick="finishModalityContent()" disabled class="w-full py-3 bg-gray-100 text-gray-400 font-semibold rounded-lg transition uppercase tracking-wider text-xs cursor-not-allowed">
             Complete Audio Listen
@@ -208,8 +212,12 @@
             <p class="text-gray-500 text-xs mt-1">Play or pause the video. Rewinding and skipping are disabled.</p>
         </div>
         <div class="relative rounded-xl overflow-hidden border border-gray-200 bg-gray-950">
-            <video id="study-video" src="Video BTL.mp4" controls controlsList="nodownload noplaybackrate" class="w-full aspect-[16/9] object-cover"></video>
+            <video id="study-video" preload="metadata" playsinline controls controlsList="nodownload noplaybackrate" class="w-full aspect-[16/9] object-contain bg-black">
+                <source src="Video%20BTL.mp4" type="video/mp4">
+                <source src="Video BTL.mp4" type="video/mp4">
+            </video>
         </div>
+        <p id="video-status-msg" class="text-[11px] text-gray-400">Press play on the video above to begin.</p>
         <button id="video-finish-btn" onclick="finishModalityContent()" disabled class="w-full py-3 bg-gray-100 text-gray-400 font-semibold rounded-lg transition uppercase tracking-wider text-xs cursor-not-allowed">
             Complete Video Viewing
         </button>
@@ -688,11 +696,34 @@
 
         function setupAudioControls() {
             const audio = document.getElementById('study-audio');
-            let lastValidTime = 0;
+            const statusMsg = document.getElementById('audio-status-msg');
+            let maxWatchedTime = 0;
+
+            audio.load();
+
             audio.addEventListener('timeupdate', () => {
-                if (audio.currentTime < lastValidTime - 0.5) audio.currentTime = lastValidTime;
-                else lastValidTime = audio.currentTime;
+                if (!audio.seeking && audio.currentTime > maxWatchedTime) {
+                    maxWatchedTime = audio.currentTime;
+                }
             });
+
+            audio.addEventListener('seeking', () => {
+                if (Math.abs(audio.currentTime - maxWatchedTime) > 1.5) {
+                    audio.currentTime = maxWatchedTime;
+                }
+            });
+
+            audio.addEventListener('play', () => {
+                if (statusMsg) statusMsg.innerText = "Audio playing...";
+            });
+
+            audio.addEventListener('error', () => {
+                if (statusMsg) {
+                    statusMsg.innerText = "⚠️ Could not load 'Audio BTL.mp3'. Ensure the file is uploaded to the same folder on GitHub with exact capitalization.";
+                    statusMsg.className = "text-xs text-rose-600 font-semibold";
+                }
+            });
+
             audio.addEventListener('ended', () => { enableFinishButton('audio-finish-btn'); });
             setTimeout(() => { enableFinishButton('audio-finish-btn'); }, 240000);
         }
@@ -701,11 +732,34 @@
 
         function setupVideoControls() {
             const video = document.getElementById('study-video');
-            let lastValidTime = 0;
+            const statusMsg = document.getElementById('video-status-msg');
+            let maxWatchedTime = 0;
+
+            video.load();
+
             video.addEventListener('timeupdate', () => {
-                if (video.currentTime < lastValidTime - 0.5) video.currentTime = lastValidTime;
-                else lastValidTime = video.currentTime;
+                if (!video.seeking && video.currentTime > maxWatchedTime) {
+                    maxWatchedTime = video.currentTime;
+                }
             });
+
+            video.addEventListener('seeking', () => {
+                if (Math.abs(video.currentTime - maxWatchedTime) > 1.5) {
+                    video.currentTime = maxWatchedTime;
+                }
+            });
+
+            video.addEventListener('play', () => {
+                if (statusMsg) statusMsg.innerText = "Video playing...";
+            });
+
+            video.addEventListener('error', () => {
+                if (statusMsg) {
+                    statusMsg.innerText = "⚠️ Could not load 'Video BTL.mp4'. Ensure the file is uploaded to the same folder on GitHub with exact capitalization.";
+                    statusMsg.className = "text-xs text-rose-600 font-semibold";
+                }
+            });
+
             video.addEventListener('ended', () => { enableFinishButton('video-finish-btn'); });
             setTimeout(() => { enableFinishButton('video-finish-btn'); }, 240000);
         }
